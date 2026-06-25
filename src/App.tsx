@@ -1,122 +1,96 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import React, { useState, useEffect } from "react";
+import { useSessionStore } from "@/state/useSessionStore";
+import { useScenarioStore } from "@/state/useScenarioStore";
+import { useUiStore } from "@/state/useUiStore";
+import { useRealtimeRoom } from "@/realtime/useRealtimeRoom";
+import { LandingPage } from "@/components/layout/LandingPage";
+import { TopBar } from "@/components/layout/TopBar";
+import { ApparatusTray } from "@/components/scenario/ApparatusTray";
+import { TacticalCanvas } from "@/components/canvas/TacticalCanvas";
+import { RightDrawer } from "@/components/scenario/RightDrawer";
+import { TimerBenchmarkBar } from "@/components/timer/TimerBenchmarkBar";
+import { sampleScenarios } from "@/data/sampleScenarios";
+import type { BuildingObject, HydrantObject } from "@/types/scenario";
+import "./styles/globals.css";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const { isSolo, roomCode, setRoomCode, setIsSolo } = useSessionStore();
+  const { run, setScenarioRun } = useScenarioStore();
+  
+  const [view, setView] = useState<"home" | "scenario-playing">("home");
+
+  // Mount the real-time sync hook
+  // This automatically sets up the WebSocket connection and message routing
+  // whenever a roomCode is set and isSolo is false!
+  useRealtimeRoom();
+
+  const handleNavigate = (nextView: "home" | "scenario-playing") => {
+    setView(nextView);
+  };
+
+  const handleBackToHome = () => {
+    if (confirm("Are you sure you want to exit the current tactical scene? Unsaved changes may be lost.")) {
+      setRoomCode(null);
+      setIsSolo(true);
+      setView("home");
+    }
+  };
+
+  // Build programmatic Overhead City Block Scene scaffold
+  useEffect(() => {
+    if (view === "scenario-playing" && run.scenarioId !== "uninitialized") {
+      const template = sampleScenarios.find(s => s.id === run.scenarioId) || sampleScenarios[0];
+      
+      // Inject standard template structures into active run objects if empty
+      if (Object.keys(run.objects).length === 0) {
+        const initialObjects: Record<string, any> = {};
+        
+        // 1. Add buildings from template
+        template.buildings.forEach((bldg) => {
+          initialObjects[bldg.id] = { ...bldg };
+        });
+
+        // 2. Add hydrants from template
+        template.hydrants.forEach((hyd) => {
+          initialObjects[hyd.id] = { ...hyd };
+        });
+
+        // Update run state
+        useScenarioStore.setState((state) => ({
+          run: {
+            ...state.run,
+            objects: initialObjects
+          }
+        }));
+      }
+    }
+  }, [view, run.scenarioId]);
+
+  if (view === "home") {
+    return <LandingPage onNavigate={handleNavigate} />;
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="h-screen w-screen bg-slate-950 flex flex-col overflow-hidden text-slate-100 font-sans">
+      {/* 1. Header Navigation & Connection status & Exports */}
+      <TopBar onBack={handleBackToHome} />
 
-      <div className="ticks"></div>
+      {/* 2. Middle Grid Panel */}
+      <div className="flex-1 flex overflow-hidden min-h-0 relative">
+        {/* Left Tray: Draggable Apparatus templates */}
+        <ApparatusTray />
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        {/* Center: Overhead animated React-Konva Tactical Board */}
+        <TacticalCanvas />
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        {/* Right Drawer: Instructor controls, Checklists, and Active Roster */}
+        <RightDrawer />
+      </div>
+
+      {/* 3. Bottom Utility Bar: Controls, Timer and 18 tactical benchmark buttons */}
+      <TimerBenchmarkBar />
+    </div>
+  );
 }
 
-export default App
+export default App;
