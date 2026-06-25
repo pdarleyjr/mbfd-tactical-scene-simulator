@@ -6,7 +6,10 @@ import { Shield, HelpCircle } from "lucide-react";
 
 export function ApparatusTray() {
   const handleDragStart = (e: React.DragEvent, template: ApparatusTemplate) => {
-    e.dataTransfer.setData("application/react-mbfd-apparatus", JSON.stringify(template));
+    const payload = JSON.stringify(template);
+    e.dataTransfer.setData("application/react-mbfd-apparatus", payload);
+    e.dataTransfer.setData("text/plain", payload); // Fallback for maximum browser compatibility
+    e.dataTransfer.effectAllowed = "copy";
   };
 
   const groupTemplates = (kind: string) => {

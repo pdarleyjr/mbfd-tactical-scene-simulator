@@ -20,7 +20,7 @@ export function TacticalCanvas() {
 
   const stageRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
   const drawingHoseRef = useRef<HoseLine | null>(null);
   const [hosePoints, setHosePoints] = useState<number[]>([]);
@@ -140,44 +140,48 @@ export function TacticalCanvas() {
     const stage = stageRef.current;
     if (!stage) return;
 
-    stage.setPointersPositions(e);
+    stage.setPointersPositions(e.nativeEvent);
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
 
-    const dragData = e.dataTransfer.getData("application/react-mbfd-apparatus");
+    // Support both standard JSON and our custom type depending on browser
+    const dragData = e.dataTransfer.getData("application/react-mbfd-apparatus") || e.dataTransfer.getData("text/plain");
     if (!dragData) return;
 
-    const parsed = JSON.parse(dragData);
-    
-    // Scale coords back relative to Zoom & Pan
-    const stageScale = stage.scaleX();
-    const droppedX = (pointer.x - stage.x()) / stageScale;
-    const droppedY = (pointer.y - stage.y()) / stageScale;
+    try {
+      const parsed = JSON.parse(dragData);
+      
+      // Get the relative pointer position to automatically handle zoom and pan transforms
+      const transform = stage.getAbsoluteTransform().copy().invert();
+      const pos = transform.point(pointer);
 
-    // Create tactical object
-    const newId = generateId("unit");
-    const timestamp = new Date().toISOString();
-    
-    const newApparatus: ApparatusObject = {
-      id: newId,
-      type: "apparatus",
-      apparatusKind: parsed.kind,
-      designation: parsed.designation,
-      status: "deployed",
-      placedAt: timestamp,
-      lastMovedAt: timestamp,
-      x: droppedX,
-      y: droppedY,
-      rotation: 0,
-      scale: 1,
-      locked: false,
-      createdBy: designation || "Instructor",
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
+      // Create tactical object
+      const newId = generateId("unit");
+      const timestamp = new Date().toISOString();
+      
+      const newApparatus: ApparatusObject = {
+        id: newId,
+        type: "apparatus",
+        apparatusKind: parsed.kind,
+        designation: parsed.designation,
+        status: "deployed",
+        placedAt: timestamp,
+        lastMovedAt: timestamp,
+        x: pos.x,
+        y: pos.y,
+        rotation: 0,
+        scale: 1,
+        locked: false,
+        createdBy: designation || "Instructor",
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
 
-    addObject(newApparatus);
-    setSelectedObjectId(newId);
+      addObject(newApparatus);
+      setSelectedObjectId(newId);
+    } catch (error) {
+      console.error("Failed to drop apparatus", error);
+    }
   };
 
   // Drawing line handlers
@@ -192,9 +196,11 @@ export function TacticalCanvas() {
     const stage = stageRef.current;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
-    const stageScale = stage.scaleX();
-    const clickX = (pointer.x - stage.x()) / stageScale;
-    const clickY = (pointer.y - stage.y()) / stageScale;
+    
+    const transform = stage.getAbsoluteTransform().copy().invert();
+    const pos = transform.point(pointer);
+    const clickX = pos.x;
+    const clickY = pos.y;
 
     // If using hose tools
     if (activeTool.startsWith("hose")) {
@@ -256,12 +262,12 @@ export function TacticalCanvas() {
     const stage = stageRef.current;
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
-    const stageScale = stage.scaleX();
-    const curX = (pointer.x - stage.x()) / stageScale;
-    const curY = (pointer.y - stage.y()) / stageScale;
+    
+    const transform = stage.getAbsoluteTransform().copy().invert();
+    const pos = transform.point(pointer);
 
     // Show dynamic line tracking mouse
-    const nextPoints = [...hosePoints, curX, curY];
+    const nextPoints = [...hosePoints, pos.x, pos.y];
     updateHosePoints(activeDrawingId, nextPoints);
   };
 
@@ -352,7 +358,7 @@ export function TacticalCanvas() {
 
       {/* Floating Rotate & Action Bar when object is selected */}
       {selectedObjectId && (
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2 bg-slate-900/95 border border-border p-2 rounded-lg shadow-xl animate-in fade-in">
+        <div className="absolute top-20 left-4 z-10 flex items-center gap-2 bg-slate-900/95 border border-border p-2 rounded-lg shadow-xl animate-in fade-in">
           <span className="text-xs font-bold text-amber-400 uppercase tracking-widest px-2">
             {run.objects[selectedObjectId]?.label || "Selected Unit"}
           </span>
@@ -401,8 +407,8 @@ export function TacticalCanvas() {
       <div className="w-full h-full flex items-center justify-center">
         <Stage
           ref={stageRef}
-          width={dimensions.width}
-          height={dimensions.height}
+          width={dimensions.width || 800}
+          height={dimensions.height || 600}
           scaleX={zoom}
           scaleY={zoom}
           x={panX}
@@ -582,7 +588,7 @@ export function TacticalCanvas() {
             <Rect x={785} y={0} width={15} height={CANVAS_HEIGHT} fill="#334155" opacity={0.15} />
             <Rect x={890} y={0} width={15} height={CANVAS_HEIGHT} fill="#334155" opacity={0.15} />
 
-             {/* 4. Render Buildings */}
+              {/* 4. Render Buildings */}
             {Object.values(run.objects)
               .filter(o => o.type === "building")
               .map((o) => {
@@ -590,25 +596,90 @@ export function TacticalCanvas() {
                 const { x, y, width, height } = bldg.footprint;
                 const isSelected = selectedObjectId === bldg.id;
                 const isIncident = bldg.selectedAsIncidentBuilding;
+                const isCommercial = bldg.occupancyType.toLowerCase().includes("commercial") || bldg.occupancyType.toLowerCase().includes("mercantile") || bldg.occupancyType.toLowerCase().includes("strip") || bldg.occupancyType.toLowerCase().includes("mall");
 
                 return (
                   <Group key={bldg.id} onClick={() => handleSelectBuilding(bldg.id)} tap={() => handleSelectBuilding(bldg.id)}>
+                    
+                    {/* Driveway / Pavement Leads (Connects houses/buildings contextually to Main St or Oak Ave) */}
+                    {y < 500 ? (
+                      // North side driveways leading down to Main St (y=500)
+                      <Rect 
+                        x={x + 15} 
+                        y={y + height} 
+                        width={22} 
+                        height={Math.max(0, 500 - (y + height))} 
+                        fill="#1a202c" 
+                        opacity={0.3} 
+                      />
+                    ) : (
+                      // South side driveways leading up to Main St (y=590)
+                      <Rect 
+                        x={x + 15} 
+                        y={590} 
+                        width={22} 
+                        height={Math.max(0, y - 590)} 
+                        fill="#1a202c" 
+                        opacity={0.3} 
+                      />
+                    )}
+
                     {/* Structure Footprint Block */}
                     <Rect
                       x={x}
                       y={y}
                       width={width}
                       height={height}
-                      fill={isIncident ? "#361010" : "#1a2436"} // Dynamic premium high-contrast building fills!
-                      stroke={isSelected ? "#f59e0b" : isIncident ? "#f43f5e" : "#475569"} // Red-rose border if incident building
+                      fill={isIncident ? "#3a1313" : "#1e293b"} // Solid Slate-Blue and Crimson Red
+                      stroke={isSelected ? "#f59e0b" : isIncident ? "#f43f5e" : "#475569"} 
                       strokeWidth={isSelected ? 3 : isIncident ? 2.5 : 1.5}
-                      cornerRadius={4}
+                      cornerRadius={3}
                       shadowColor="#000"
-                      shadowBlur={8}
+                      shadowBlur={6}
                       shadowOpacity={0.4}
                     />
 
-                    {/* Floor Label inside the block */}
+                    {/* Architectural Detail 1: Pitch Roof Gable Lines for Residential Houses */}
+                    {!isCommercial && (
+                      <Group opacity={0.3}>
+                        {/* Center ridge line */}
+                        <Line 
+                          points={[x + 15, y + height / 2, x + width - 15, y + height / 2]} 
+                          stroke="#94a3b8" 
+                          strokeWidth={1} 
+                        />
+                        {/* Gable hips to corners */}
+                        <Line points={[x, y, x + 15, y + height / 2]} stroke="#94a3b8" strokeWidth={1} />
+                        <Line points={[x, y + height, x + 15, y + height / 2]} stroke="#94a3b8" strokeWidth={1} />
+                        <Line points={[x + width, y, x + width - 15, y + height / 2]} stroke="#94a3b8" strokeWidth={1} />
+                        <Line points={[x + width, y + height, x + width - 15, y + height / 2]} stroke="#94a3b8" strokeWidth={1} />
+                      </Group>
+                    )}
+
+                    {/* Architectural Detail 2: Front Porch representation for Houses */}
+                    {!isCommercial && (
+                      <Rect 
+                        x={x + width / 2 - 30} 
+                        y={y < 500 ? y + height - 8 : y - 4} 
+                        width={60} 
+                        height={12} 
+                        fill="#334155" 
+                        stroke="#475569" 
+                        strokeWidth={0.8} 
+                        cornerRadius={1} 
+                        opacity={0.5} 
+                      />
+                    )}
+
+                    {/* Architectural Detail 3: Partition Storefront walls for Commercial strips */}
+                    {isCommercial && width > 180 && (
+                      <Group opacity={0.25}>
+                        <Line points={[x + width / 3, y, x + width / 3, y + height]} stroke="#94a3b8" strokeWidth={1} dash={[4, 4]} />
+                        <Line points={[x + (width * 2) / 3, y, x + (width * 2) / 3, y + height]} stroke="#94a3b8" strokeWidth={1} dash={[4, 4]} />
+                      </Group>
+                    )}
+
+                    {/* Floor Label Badge inside the block */}
                     <Rect
                       x={x + 6}
                       y={y + 6}
@@ -664,56 +735,59 @@ export function TacticalCanvas() {
                       </Group>
                     )}
 
-                    {/* FIRE condition visualizer pulsing effects */}
+                    {/* FIRE condition visualizer: MULTI-LAYERED flickering vector flames! */}
                     {isIncident && bldg.fireCondition.intensity !== "none" && (
-                      <Group>
-                        {/* Render pulsing concentric orange/red circles inside footprint representing flames */}
-                        <Circle
-                          x={x + width/2}
-                          y={y + height/2}
-                          radius={Math.min(width, height) * 0.35}
-                          fillPriority="radial"
-                          fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                          fillRadialGradientStartRadius={0}
-                          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                          fillRadialGradientEndRadius={Math.min(width, height) * 0.35}
-                          fillRadialGradientColorStops={[
-                            0, "rgba(239, 68, 68, 0.75)", // bright red
-                            0.5, "rgba(245, 158, 11, 0.55)", // amber
-                            1, "rgba(239, 68, 68, 0)" // transparent
-                          ]}
+                      <Group x={x + width / 2} y={y + height / 2 - 10}>
+                        {/* Red outer fire shape */}
+                        <Path
+                          data="M 0 30 L -25 -10 L -8 -5 L 0 -35 L 8 -5 L 25 -10 Z"
+                          fill="#ef4444"
+                          scaleX={bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? 1.4 : 0.9}
+                          scaleY={bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? 1.4 : 0.9}
+                          opacity={0.8}
+                          shadowColor="#ef4444"
+                          shadowBlur={15}
+                          shadowOpacity={0.6}
                         />
-                        {bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? (
-                          <Circle
-                            x={x + width/2}
-                            y={y + height/2}
-                            radius={Math.min(width, height) * 0.45}
-                            stroke="#f59e0b"
-                            strokeWidth={2}
-                            dash={[5, 10]}
-                          />
-                        ) : null}
+                        {/* Orange middle flame */}
+                        <Path
+                          data="M 0 25 L -16 -5 L -5 -2 L 0 -24 L 5 -2 L 16 -5 Z"
+                          fill="#f97316"
+                          scaleX={bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? 1.3 : 0.8}
+                          scaleY={bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? 1.3 : 0.8}
+                          opacity={0.9}
+                        />
+                        {/* Yellow hot core flame */}
+                        <Path
+                          data="M 0 18 L -8 0 L 0 -12 L 8 0 Z"
+                          fill="#eab308"
+                          scaleX={bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? 1.1 : 0.7}
+                          scaleY={bldg.fireCondition.intensity === "heavy" || bldg.fireCondition.intensity === "fully_involved" ? 1.1 : 0.7}
+                          opacity={0.95}
+                        />
                       </Group>
                     )}
 
-                    {/* SMOKE condition visualizer pulsing gray clouds */}
+                    {/* SMOKE condition visualizer: Layered rolling multi-puff smoke column! */}
                     {isIncident && bldg.smokeCondition.level !== "none" && (
-                      <Group>
-                        <Circle
-                          x={x + width/2 + 25}
-                          y={y + height/2 - 15}
-                          radius={Math.min(width, height) * 0.4}
-                          fillPriority="radial"
-                          fillRadialGradientStartPoint={{ x: 0, y: 0 }}
-                          fillRadialGradientStartRadius={0}
-                          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-                          fillRadialGradientEndRadius={Math.min(width, height) * 0.4}
-                          fillRadialGradientColorStops={[
-                            0, bldg.smokeCondition.level === "black_turbulent" ? "rgba(15, 23, 42, 0.95)" : "rgba(148, 163, 184, 0.75)",
-                            0.6, bldg.smokeCondition.level === "black_turbulent" ? "rgba(30, 41, 59, 0.65)" : "rgba(100, 116, 139, 0.45)",
-                            1, "rgba(255, 255, 255, 0)"
-                          ]}
-                        />
+                      <Group x={x + width / 2 + 10} y={y + height / 2 - 20}>
+                        {(() => {
+                          const isDark = bldg.smokeCondition.level === "black_turbulent";
+                          const smokeColor = isDark ? "rgba(30, 41, 59, 0.85)" : "rgba(148, 163, 184, 0.75)";
+                          const glowColor = isDark ? "rgba(15, 23, 42, 0.4)" : "rgba(203, 213, 225, 0.3)";
+                          return (
+                            <Group>
+                              {/* Bottom wide puff */}
+                              <Circle x={-20} y={-10} radius={22} fill={smokeColor} shadowColor={glowColor} shadowBlur={8} />
+                              <Circle x={20} y={-10} radius={24} fill={smokeColor} shadowColor={glowColor} shadowBlur={8} />
+                              {/* Center main puff */}
+                              <Circle x={0} y={-25} radius={28} fill={smokeColor} shadowColor={glowColor} shadowBlur={12} />
+                              {/* Higher drift puff */}
+                              <Circle x={-10} y={-45} radius={18} fill={smokeColor} opacity={0.65} />
+                              <Circle x={15} y={-45} radius={16} fill={smokeColor} opacity={0.65} />
+                            </Group>
+                          );
+                        })()}
                       </Group>
                     )}
                   </Group>

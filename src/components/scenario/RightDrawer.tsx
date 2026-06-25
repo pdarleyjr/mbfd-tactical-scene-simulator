@@ -81,7 +81,7 @@ export function RightDrawer() {
   return (
     <div className="w-[340px] bg-slate-900 border-l border-border p-4 flex flex-col gap-4 overflow-y-auto shrink-0 select-none h-full">
       {/* Top Tabs Switcher */}
-      <Tabs defaultValue={activeTabRight} onValueChange={(val: any) => setActiveTabRight(val)} className="w-full">
+      <Tabs value={activeTabRight} onValueChange={(val: any) => setActiveTabRight(val)} className="w-full">
         <TabsList className="grid grid-cols-2 w-full">
           <TabsTrigger value="tactics">Tactical Check</TabsTrigger>
           <TabsTrigger value="instructor">Instructor</TabsTrigger>

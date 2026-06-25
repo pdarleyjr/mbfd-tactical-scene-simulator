@@ -10,6 +10,7 @@ export default defineConfig({
     react(), 
     tailwindcss(),
     VitePWA({
+      selfDestroying: true,
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'icons.svg'],
       manifest: {
@@ -29,7 +30,9 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,jpg,ico,json}']
+        globPatterns: ['**/*.{js,css,html,svg,png,jpg,ico,json}'],
+        skipWaiting: true,
+        clientsClaim: true
       }
     })
   ],

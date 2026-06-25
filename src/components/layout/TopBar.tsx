@@ -4,7 +4,7 @@ import { useScenarioStore } from "@/state/useScenarioStore";
 import { useUiStore } from "@/state/useUiStore";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Shield, Radio, Users, Download, ArrowLeft, Camera, FileText, Database, ClipboardList } from "lucide-react";
+import { Shield, Radio, Users, Download, ArrowLeft, Camera, FileText, Database, ClipboardList, SlidersHorizontal } from "lucide-react";
 import { exportAfterActionReport } from "@/lib/exportPdf";
 import { formatElapsed, formatDateTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,7 @@ interface TopBarProps {
 export function TopBar({ onBack }: TopBarProps) {
   const { roomCode, isSolo, isConnected, role, designation } = useSessionStore();
   const { run } = useScenarioStore();
-  const { getStageDataUrl } = useUiStore();
+  const { getStageDataUrl, isRightDrawerOpen, setRightDrawerOpen } = useUiStore();
 
   const [showTimelineModal, setShowTimelineModal] = useState(false);
 
@@ -120,6 +120,15 @@ export function TopBar({ onBack }: TopBarProps) {
 
       {/* Right side Exports toolbar */}
       <div className="flex items-center gap-2">
+        <Button 
+          variant={isRightDrawerOpen ? "gold" : "tactical"} 
+          size="sm" 
+          className="text-xs font-bold" 
+          onClick={() => setRightDrawerOpen(!isRightDrawerOpen)}
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5 mr-1" />
+          {isRightDrawerOpen ? "Hide Controls" : "Show Controls"}
+        </Button>
         <Button variant="tactical" size="sm" className="text-xs" onClick={handleExportPng}>
           <Camera className="w-3.5 h-3.5 mr-1" /> Board PNG
         </Button>

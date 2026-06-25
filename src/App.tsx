@@ -16,6 +16,7 @@ import "./styles/globals.css";
 function App() {
   const { isSolo, roomCode, setRoomCode, setIsSolo } = useSessionStore();
   const { run, setScenarioRun } = useScenarioStore();
+  const { isRightDrawerOpen } = useUiStore();
   
   const [view, setView] = useState<"home" | "scenario-playing">("home");
 
@@ -54,7 +55,7 @@ function App() {
         <TacticalCanvas />
 
         {/* Right Drawer: Instructor controls, Checklists, and Active Roster */}
-        <RightDrawer />
+        {isRightDrawerOpen && <RightDrawer />}
       </div>
 
       {/* 3. Bottom Utility Bar: Controls, Timer and 18 tactical benchmark buttons */}

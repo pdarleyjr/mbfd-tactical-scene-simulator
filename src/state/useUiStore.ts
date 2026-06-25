@@ -12,6 +12,7 @@ interface UiState {
   showDesignationModal: boolean;
   activeTabRight: "instructor" | "tactics" | "considerations";
   getStageDataUrl: (() => string) | null;
+  isRightDrawerOpen: boolean;
   
   setActiveTool: (tool: CanvasTool) => void;
   setSelectedObjectId: (id: string | null) => void;
@@ -22,6 +23,7 @@ interface UiState {
   setActiveTabRight: (tab: "instructor" | "tactics" | "considerations") => void;
   resetViewport: () => void;
   setGetStageDataUrl: (fn: (() => string) | null) => void;
+  setRightDrawerOpen: (open: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -34,6 +36,7 @@ export const useUiStore = create<UiState>((set) => ({
   showDesignationModal: false,
   activeTabRight: "tactics",
   getStageDataUrl: null,
+  isRightDrawerOpen: typeof window !== "undefined" ? window.innerWidth >= 1024 : true,
 
   setActiveTool: (tool) => set({ activeTool: tool }),
   setSelectedObjectId: (id) => set({ selectedObjectId: id }),
@@ -43,5 +46,6 @@ export const useUiStore = create<UiState>((set) => ({
   setShowDesignationModal: (show) => set({ showDesignationModal: show }),
   setActiveTabRight: (tab) => set({ activeTabRight: tab }),
   resetViewport: () => set({ zoom: 1, panX: 0, panY: 0 }),
-  setGetStageDataUrl: (fn) => set({ getStageDataUrl: fn })
+  setGetStageDataUrl: (fn) => set({ getStageDataUrl: fn }),
+  setRightDrawerOpen: (open) => set({ isRightDrawerOpen: open })
 }));
