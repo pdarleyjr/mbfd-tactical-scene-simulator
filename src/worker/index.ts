@@ -17,7 +17,7 @@ export default {
     if (url.pathname.startsWith("/ws/")) {
       const roomCode = url.pathname.substring(4).toUpperCase();
       
-      if (!roomCode || roomCode.length < 4 || roomCode.length > 8) {
+      if (!roomCode || roomCode.length < 4 || roomCode.length > 16) {
         return new Response("Invalid Scenario Room Code", { status: 400 });
       }
 

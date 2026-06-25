@@ -19,9 +19,52 @@ export function TacticalCanvas() {
   const { designation, role, isSolo } = useSessionStore();
 
   const stageRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
+
   const drawingHoseRef = useRef<HoseLine | null>(null);
   const [hosePoints, setHosePoints] = useState<number[]>([]);
   const [activeDrawingId, setActiveDrawingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateSize = () => {
+      if (containerRef.current) {
+        setDimensions({
+          width: containerRef.current.clientWidth || window.innerWidth - 650,
+          height: containerRef.current.clientHeight || window.innerHeight - 150
+        });
+      }
+    };
+    updateSize();
+    const observer = new ResizeObserver(() => {
+      updateSize();
+    });
+    observer.observe(containerRef.current);
+    window.addEventListener("resize", updateSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, []);
+
+  // Fit canvas to screen on mount / initial dimension load
+  const hasAutoFitted = useRef(false);
+  useEffect(() => {
+    if (dimensions.width > 0 && dimensions.height > 0 && !hasAutoFitted.current) {
+      hasAutoFitted.current = true;
+      const padding = 20; // 20px padding around the map
+      const scaleX = (dimensions.width - padding * 2) / CANVAS_WIDTH;
+      const scaleY = (dimensions.height - padding * 2) / CANVAS_HEIGHT;
+      const fitZoom = Math.min(scaleX, scaleY);
+      
+      const x = (dimensions.width - CANVAS_WIDTH * fitZoom) / 2;
+      const y = (dimensions.height - CANVAS_HEIGHT * fitZoom) / 2;
+      
+      setZoom(fitZoom);
+      setPan(x, y);
+    }
+  }, [dimensions.width, dimensions.height]);
 
   useEffect(() => {
     setGetStageDataUrl(() => {
@@ -256,6 +299,7 @@ export function TacticalCanvas() {
 
   return (
     <div 
+      ref={containerRef}
       className="flex-1 h-full bg-slate-950 relative overflow-hidden flex flex-col items-center justify-center border-r border-border"
       onDragOver={handleDragOver}
       onDrop={handleDropApparatus}
@@ -357,8 +401,8 @@ export function TacticalCanvas() {
       <div className="w-full h-full flex items-center justify-center">
         <Stage
           ref={stageRef}
-          width={stageRef.current?.container()?.parentElement?.offsetWidth || window.innerWidth - 650}
-          height={stageRef.current?.container()?.parentElement?.offsetHeight || window.innerHeight - 150}
+          width={dimensions.width}
+          height={dimensions.height}
           scaleX={zoom}
           scaleY={zoom}
           x={panX}
@@ -374,26 +418,28 @@ export function TacticalCanvas() {
               name="background"
               width={CANVAS_WIDTH} 
               height={CANVAS_HEIGHT} 
-              fill="#0f172a" // Slate 900
+              fill="#080c14" // Slate-Black (High-Contrast background)
+              stroke="#eab308" // Amber-500 Solid Map Border!
+              strokeWidth={3}
             />
 
-            {/* 2. Grid helper lines to make it look highly technical */}
-            {Array.from({ length: 16 }).map((_, i) => (
+            {/* 2. Grid helper lines to make it look highly technical like CAD / Blueprint */}
+            {Array.from({ length: 32 }).map((_, i) => (
               <Line 
                 key={`grid-x-${i}`}
-                points={[i * 100, 0, i * 100, CANVAS_HEIGHT]}
+                points={[i * 50, 0, i * 50, CANVAS_HEIGHT]}
                 stroke="#1e293b"
-                strokeWidth={0.5}
-                dash={[5, 10]}
+                strokeWidth={i % 2 === 0 ? 0.8 : 0.4}
+                opacity={0.35}
               />
             ))}
-            {Array.from({ length: 10 }).map((_, i) => (
+            {Array.from({ length: 20 }).map((_, i) => (
               <Line 
                 key={`grid-y-${i}`}
-                points={[0, i * 100, CANVAS_WIDTH, i * 100]}
+                points={[0, i * 50, CANVAS_WIDTH, i * 50]}
                 stroke="#1e293b"
-                strokeWidth={0.5}
-                dash={[5, 10]}
+                strokeWidth={i % 2 === 0 ? 0.8 : 0.4}
+                opacity={0.35}
               />
             ))}
 
@@ -404,7 +450,7 @@ export function TacticalCanvas() {
               y={500} 
               width={CANVAS_WIDTH} 
               height={STREET_WIDTH} 
-              fill="#1e293b" // Slate 800
+              fill="#181f2d" // Solid, premium Asphalt Gray
               stroke="#334155"
               strokeWidth={1}
             />
@@ -414,51 +460,129 @@ export function TacticalCanvas() {
               y={0} 
               width={STREET_WIDTH} 
               height={CANVAS_HEIGHT} 
-              fill="#1e293b"
+              fill="#181f2d" // Solid, premium Asphalt Gray
               stroke="#334155"
               strokeWidth={1}
             />
-            
-            {/* Yellow dashes down the street centers */}
+
+            {/* Solid curb lanes (curb outlines) */}
+            {/* Horizontal Road curbs */}
+            <Line points={[0, 500, CANVAS_WIDTH, 500]} stroke="#475569" strokeWidth={1.5} opacity={0.6} />
+            <Line points={[0, 590, CANVAS_WIDTH, 590]} stroke="#475569" strokeWidth={1.5} opacity={0.6} />
+            {/* Vertical Road curbs */}
+            <Line points={[800, 0, 800, CANVAS_HEIGHT]} stroke="#475569" strokeWidth={1.5} opacity={0.6} />
+            <Line points={[890, 0, 890, CANVAS_HEIGHT]} stroke="#475569" strokeWidth={1.5} opacity={0.6} />
+
+            {/* Double Solid Yellow Centerlines for premium CAD realism! */}
+            {/* Horizontal centerlines */}
             <Line 
-              points={[0, 545, CANVAS_WIDTH, 545]} 
-              stroke="#f59e0b" // Yellow
+              points={[0, 543, CANVAS_WIDTH, 543]} 
+              stroke="#f59e0b" // Amber/Yellow
               strokeWidth={1.5} 
-              dash={[15, 15]} 
             />
             <Line 
-              points={[845, 0, 845, CANVAS_HEIGHT]} 
-              stroke="#f59e0b" // Yellow
+              points={[0, 547, CANVAS_WIDTH, 547]} 
+              stroke="#f59e0b" // Amber/Yellow
               strokeWidth={1.5} 
-              dash={[15, 15]} 
+            />
+            {/* Vertical centerlines */}
+            <Line 
+              points={[843, 0, 843, CANVAS_HEIGHT]} 
+              stroke="#f59e0b" // Amber/Yellow
+              strokeWidth={1.5} 
+            />
+            <Line 
+              points={[847, 0, 847, CANVAS_HEIGHT]} 
+              stroke="#f59e0b" // Amber/Yellow
+              strokeWidth={1.5} 
             />
 
-            {/* Intersections and labels */}
-            <Text 
-              x={400} 
-              y={510} 
-              text="MAIN STREET" 
-              fill="#475569" 
-              fontSize={11} 
-              fontStyle="bold"
-            />
-            <Text 
-              x={855} 
-              y={200} 
-              text="OAK AVE" 
-              fill="#475569" 
-              fontSize={11} 
-              fontStyle="bold"
-              rotation={90}
-            />
+            {/* White Zebra Crosswalks around the intersection! */}
+            {/* Left Crosswalk */}
+            {Array.from({ length: 5 }).map((_, j) => (
+              <Rect 
+                key={`crosswalk-l-${j}`}
+                x={755}
+                y={504 + (j * 18)}
+                width={35}
+                height={8}
+                fill="#ffffff"
+                opacity={0.4}
+              />
+            ))}
+            {/* Right Crosswalk */}
+            {Array.from({ length: 5 }).map((_, j) => (
+              <Rect 
+                key={`crosswalk-r-${j}`}
+                x={900}
+                y={504 + (j * 18)}
+                width={35}
+                height={8}
+                fill="#ffffff"
+                opacity={0.4}
+              />
+            ))}
+            {/* Top Crosswalk */}
+            {Array.from({ length: 5 }).map((_, j) => (
+              <Rect 
+                key={`crosswalk-t-${j}`}
+                x={804 + (j * 18)}
+                y={455}
+                width={8}
+                height={35}
+                fill="#ffffff"
+                opacity={0.4}
+              />
+            ))}
+            {/* Bottom Crosswalk */}
+            {Array.from({ length: 5 }).map((_, j) => (
+              <Rect 
+                key={`crosswalk-b-${j}`}
+                x={804 + (j * 18)}
+                y={600}
+                width={8}
+                height={35}
+                fill="#ffffff"
+                opacity={0.4}
+              />
+            ))}
+
+            {/* Monospaced Monochromatic Street Labels with rounded background pills */}
+            <Group>
+              <Rect x={340} y={512} width={130} height={20} fill="#0f172a" stroke="#334155" strokeWidth={1} cornerRadius={10} shadowColor="#000" shadowBlur={3} shadowOpacity={0.5} />
+              <Text 
+                x={340} 
+                y={517} 
+                text="MAIN STREET" 
+                fill="#cbd5e1" 
+                fontSize={10} 
+                fontStyle="bold"
+                width={130}
+                align="center"
+              />
+            </Group>
+            <Group>
+              {/* Monospaced Monochromatic Oak Ave rotated label */}
+              <Rect x={855} y={150} width={110} height={20} fill="#0f172a" stroke="#334155" strokeWidth={1} cornerRadius={10} shadowColor="#000" shadowBlur={3} shadowOpacity={0.5} />
+              <Text 
+                x={855} 
+                y={155} 
+                text="OAK AVE" 
+                fill="#cbd5e1" 
+                fontSize={10} 
+                fontStyle="bold"
+                width={110}
+                align="center"
+              />
+            </Group>
 
             {/* Sidewalk borders */}
-            <Rect x={0} y={485} width={CANVAS_WIDTH} height={15} fill="#020617" opacity={0.3} />
-            <Rect x={0} y={590} width={CANVAS_WIDTH} height={15} fill="#020617" opacity={0.3} />
-            <Rect x={785} y={0} width={15} height={CANVAS_HEIGHT} fill="#020617" opacity={0.3} />
-            <Rect x={890} y={0} width={15} height={CANVAS_HEIGHT} fill="#020617" opacity={0.3} />
+            <Rect x={0} y={485} width={CANVAS_WIDTH} height={15} fill="#334155" opacity={0.15} />
+            <Rect x={0} y={590} width={CANVAS_WIDTH} height={15} fill="#334155" opacity={0.15} />
+            <Rect x={785} y={0} width={15} height={CANVAS_HEIGHT} fill="#334155" opacity={0.15} />
+            <Rect x={890} y={0} width={15} height={CANVAS_HEIGHT} fill="#334155" opacity={0.15} />
 
-            {/* 4. Render Buildings */}
+             {/* 4. Render Buildings */}
             {Object.values(run.objects)
               .filter(o => o.type === "building")
               .map((o) => {
@@ -475,9 +599,9 @@ export function TacticalCanvas() {
                       y={y}
                       width={width}
                       height={height}
-                      fill={isIncident ? "#18181b" : "#0f172a"} // Darker background
-                      stroke={isSelected ? "#f59e0b" : isIncident ? "#ef4444" : "#475569"} // Red border if incident building
-                      strokeWidth={isSelected ? 3 : isIncident ? 2.5 : 1}
+                      fill={isIncident ? "#361010" : "#1a2436"} // Dynamic premium high-contrast building fills!
+                      stroke={isSelected ? "#f59e0b" : isIncident ? "#f43f5e" : "#475569"} // Red-rose border if incident building
+                      strokeWidth={isSelected ? 3 : isIncident ? 2.5 : 1.5}
                       cornerRadius={4}
                       shadowColor="#000"
                       shadowBlur={8}
@@ -490,14 +614,16 @@ export function TacticalCanvas() {
                       y={y + 6}
                       width={28}
                       height={18}
-                      fill="#020617"
+                      fill="#0b0f17"
+                      stroke={isIncident ? "#f43f5e" : "#475569"}
+                      strokeWidth={1}
                       cornerRadius={2}
                     />
                     <Text
                       x={x + 10}
                       y={y + 10}
                       text={`${bldg.floors}F`}
-                      fill="#94a3b8"
+                      fill={isIncident ? "#f43f5e" : "#cbd5e1"}
                       fontSize={10}
                       fontStyle="bold"
                     />
@@ -507,7 +633,7 @@ export function TacticalCanvas() {
                       x={x + 40}
                       y={y + 10}
                       text={bldg.label}
-                      fill="#f1f5f9"
+                      fill="#f8fafc"
                       fontSize={11}
                       fontStyle="bold"
                       width={width - 45}
@@ -519,7 +645,7 @@ export function TacticalCanvas() {
                       x={x + 10}
                       y={y + height - 26}
                       text={`${bldg.occupancyType} | ${bldg.constructionType}`}
-                      fill="#64748b"
+                      fill="#94a3b8"
                       fontSize={8.5}
                       fontStyle="bold"
                     />
@@ -528,13 +654,13 @@ export function TacticalCanvas() {
                     {isIncident && (
                       <Group>
                         {/* Side Alpha - Front */}
-                        <Text x={x + width/2 - 12} y={y + height + 6} text="SIDE A" fill="#f8fafc" fontSize={9} fontStyle="bold" />
+                        <Text x={x + width/2 - 16} y={y + height + 6} text="SIDE A" fill="#f8fafc" fontSize={9} fontStyle="black" />
                         {/* Side Bravo - Left */}
-                        <Text x={x - 42} y={y + height/2 - 5} text="SIDE B" fill="#f8fafc" fontSize={9} fontStyle="bold" />
+                        <Text x={x - 44} y={y + height/2 - 5} text="SIDE B" fill="#f8fafc" fontSize={9} fontStyle="black" />
                         {/* Side Charlie - Rear */}
-                        <Text x={x + width/2 - 12} y={y - 14} text="SIDE C" fill="#f8fafc" fontSize={9} fontStyle="bold" />
+                        <Text x={x + width/2 - 16} y={y - 14} text="SIDE C" fill="#f8fafc" fontSize={9} fontStyle="black" />
                         {/* Side Delta - Right */}
-                        <Text x={x + width + 8} y={y + height/2 - 5} text="SIDE D" fill="#f8fafc" fontSize={9} fontStyle="bold" />
+                        <Text x={x + width + 8} y={y + height/2 - 5} text="SIDE D" fill="#f8fafc" fontSize={9} fontStyle="black" />
                       </Group>
                     )}
 
@@ -546,7 +672,6 @@ export function TacticalCanvas() {
                           x={x + width/2}
                           y={y + height/2}
                           radius={Math.min(width, height) * 0.35}
-                          fill="radial-gradient"
                           fillPriority="radial"
                           fillRadialGradientStartPoint={{ x: 0, y: 0 }}
                           fillRadialGradientStartRadius={0}
@@ -578,7 +703,6 @@ export function TacticalCanvas() {
                           x={x + width/2 + 25}
                           y={y + height/2 - 15}
                           radius={Math.min(width, height) * 0.4}
-                          fill="radial-gradient"
                           fillPriority="radial"
                           fillRadialGradientStartPoint={{ x: 0, y: 0 }}
                           fillRadialGradientStartRadius={0}
@@ -615,30 +739,30 @@ export function TacticalCanvas() {
                   >
                     {/* Blue tactical water ring */}
                     <Circle
-                      radius={12}
-                      fill="#1d4ed8" // Dark Blue
-                      stroke={isSelected ? "#f59e0b" : "#3b82f6"} // Amber rotate highlight
-                      strokeWidth={isSelected ? 2.5 : 1}
+                      radius={14}
+                      fill="#0284c7" // Bright Sky Blue
+                      stroke={isSelected ? "#f59e0b" : "#38bdf8"} // Sky Blue glow
+                      strokeWidth={isSelected ? 3 : 1.5}
                       shadowColor="#000"
-                      shadowBlur={4}
-                      shadowOpacity={0.4}
+                      shadowBlur={6}
+                      shadowOpacity={0.5}
                     />
                     <Text
-                      x={-4}
-                      y={-4}
+                      x={-5}
+                      y={-5}
                       text="H"
                       fill="#ffffff"
-                      fontSize={9.5}
-                      fontStyle="bold"
+                      fontSize={11}
+                      fontStyle="black"
                     />
                     <Text
-                      x={-25}
-                      y={15}
+                      x={-40}
+                      y={18}
                       text={hyd.label || "Hydrant"}
-                      fill="#94a3b8"
-                      fontSize={8}
-                      fontStyle="bold"
-                      width={50}
+                      fill="#38bdf8"
+                      fontSize={9}
+                      fontStyle="black"
+                      width={80}
                       align="center"
                     />
                   </Group>

@@ -3,7 +3,7 @@ import { z } from "zod";
 // Base messages schemas using Zod
 export const JoinMessageSchema = z.object({
   type: z.literal("join"),
-  roomCode: z.string().min(4).max(8),
+  roomCode: z.string().min(4).max(16),
   designation: z.string().min(1).max(16),
   isHost: z.boolean().default(false)
 });
