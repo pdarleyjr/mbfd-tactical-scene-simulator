@@ -36,36 +36,6 @@ function App() {
     }
   };
 
-  // Build programmatic Overhead City Block Scene scaffold
-  useEffect(() => {
-    if (view === "scenario-playing" && run.scenarioId !== "uninitialized") {
-      const template = sampleScenarios.find(s => s.id === run.scenarioId) || sampleScenarios[0];
-      
-      // Inject standard template structures into active run objects if empty
-      if (Object.keys(run.objects).length === 0) {
-        const initialObjects: Record<string, any> = {};
-        
-        // 1. Add buildings from template
-        template.buildings.forEach((bldg) => {
-          initialObjects[bldg.id] = { ...bldg };
-        });
-
-        // 2. Add hydrants from template
-        template.hydrants.forEach((hyd) => {
-          initialObjects[hyd.id] = { ...hyd };
-        });
-
-        // Update run state
-        useScenarioStore.setState((state) => ({
-          run: {
-            ...state.run,
-            objects: initialObjects
-          }
-        }));
-      }
-    }
-  }, [view, run.scenarioId]);
-
   if (view === "home") {
     return <LandingPage onNavigate={handleNavigate} />;
   }

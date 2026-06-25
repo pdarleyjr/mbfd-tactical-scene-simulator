@@ -40,7 +40,16 @@ export function useRealtimeRoom() {
           case "joined_ack":
             console.log("Successfully connected to room server, payload:", payload);
             useSessionStore.getState().setClientId(payload.clientId);
-            setScenarioRun(payload.state);
+            if (payload.state.scenarioId === "uninitialized" && role === "Host/Instructor") {
+              // Server is uninitialized, upload local run configuration (buildings, hydrants, etc.)
+              const currentRun = useScenarioStore.getState().run;
+              client.send({
+                type: "scenario_patch",
+                patch: currentRun
+              });
+            } else {
+              setScenarioRun(payload.state);
+            }
             break;
 
           case "room_snapshot":

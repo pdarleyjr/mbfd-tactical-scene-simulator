@@ -92,12 +92,21 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       const template = sampleScenarios.find(s => s.id === selectedTemplateId) || sampleScenarios[0];
       resetScenarioRun("SOLO");
       
+      // Build synchronous initial structures (buildings and hydrants)
+      const initialObjects: Record<string, any> = {};
+      template.buildings.forEach((bldg) => {
+        initialObjects[bldg.id] = { ...bldg };
+      });
+      template.hydrants.forEach((hyd) => {
+        initialObjects[hyd.id] = { ...hyd };
+      });
+
       // Scaffold initial run
       const initialRun = {
         roomCode: "SOLO",
         scenarioId: template.id,
         scenarioTitle: template.title,
-        objects: {},
+        objects: initialObjects,
         hoses: {},
         tacticalConsiderations: {},
         timer: { startedAt: null, pausedAt: null, accumulatedSeconds: 0, isRunning: false },
@@ -121,11 +130,20 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       const template = sampleScenarios.find(s => s.id === selectedTemplateId) || sampleScenarios[0];
       resetScenarioRun(code);
 
+      // Build synchronous initial structures (buildings and hydrants)
+      const initialObjects: Record<string, any> = {};
+      template.buildings.forEach((bldg) => {
+        initialObjects[bldg.id] = { ...bldg };
+      });
+      template.hydrants.forEach((hyd) => {
+        initialObjects[hyd.id] = { ...hyd };
+      });
+
       const initialRun = {
         roomCode: code,
         scenarioId: template.id,
         scenarioTitle: template.title,
-        objects: {},
+        objects: initialObjects,
         hoses: {},
         tacticalConsiderations: {},
         timer: { startedAt: null, pausedAt: null, accumulatedSeconds: 0, isRunning: false },
