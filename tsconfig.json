@@ -1,7 +1,10 @@
 {
   "files": [],
   "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
+    { "path": "./packages/domain" },
+    { "path": "./packages/fire-model" },
+    { "path": "./packages/collaboration" },
+    { "path": "./apps/server" },
+    { "path": "./apps/web" }
   ]
 }

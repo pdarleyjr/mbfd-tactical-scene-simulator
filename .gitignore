@@ -11,10 +11,16 @@ node_modules
 dist
 dist-ssr
 *.local
+*.tsbuildinfo
 .env
 .env.*
 !.env.example
 .wrangler
+secrets/
+coverage/
+playwright-report/
+test-results/
+.deploy/
 
 # Editor directories and files
 .vscode/*
