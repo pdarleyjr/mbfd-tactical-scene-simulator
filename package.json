@@ -11,7 +11,7 @@
     "dev": "pnpm --parallel --filter @mbfd/server --filter @mbfd/web dev",
     "dev:e2e": "pnpm --parallel --filter @mbfd/server --filter @mbfd/web dev:e2e",
     "build": "pnpm -r --if-present build",
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "tsc -b --pretty false",
     "lint": "oxlint apps packages",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
