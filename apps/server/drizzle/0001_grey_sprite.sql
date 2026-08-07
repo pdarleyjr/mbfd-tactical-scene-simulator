@@ -1,0 +1,1 @@
+ALTER TABLE "scenarios" ADD COLUMN "static_objects" jsonb DEFAULT '[]'::jsonb NOT NULL;
