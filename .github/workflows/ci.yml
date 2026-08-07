@@ -1,0 +1,38 @@
+name: V2 quality gates
+
+on:
+  push:
+    branches: [main, v2-rebuild]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.20.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test:coverage
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - name: Validate production images
+        run: |
+          mkdir -p secrets
+          printf 'ci-database-password' > secrets/database_password
+          printf 'ci-signing-secret-that-is-at-least-32-characters' > secrets/session_signing_secret
+          printf '246810' > secrets/instructor_pin
+          docker compose config --quiet
+          docker compose build

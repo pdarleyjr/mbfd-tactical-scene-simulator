@@ -1,25 +1,14 @@
-# Third-Party Licenses
+# Third-party software notices
 
-The MBFD Tactical Scene Simulator utilizes several free, open-source, and CC0-licensed assets and frameworks. This file summarizes their respective licenses.
+The application uses open-source packages whose complete license texts and transitive notices are available in their distributions. Principal direct dependencies include:
 
-## 1. UI Primitives & Styling
-*   **Tailwind CSS** (v4) - [MIT License](https://github.com/tailwindlabs/tailwindcss/blob/main/LICENSE)
-*   **shadcn/ui Layouts** - [MIT License](https://github.com/shadcn-id/ui/blob/main/LICENSE.md)
-*   **Lucide React Icons** - [ISC License](https://github.com/lucide-react/lucide/blob/main/LICENSE)
+- React, React DOM, TanStack Query, TanStack Router, Zustand, Konva, React-Konva, Yjs, y-indexeddb, Hocuspocus, Fastify, Vite, Tailwind CSS, Zod, PostgreSQL client libraries, and Lucide: permissive open-source licenses published with each package.
+- Drizzle ORM: Apache License 2.0.
+- Barlow and Source Sans 3 fonts: SIL Open Font License 1.1.
+- PostgreSQL: PostgreSQL License.
+- Caddy: Apache License 2.0.
+- FFmpeg in the runtime image: distributed under its configured LGPL/GPL terms by the Debian project.
 
-## 2. Dynamic Canvas Board
-*   **React-Konva / Konva.js** - [MIT License](https://github.com/konvajs/konva/blob/master/LICENSE)
+The aerial map, apparatus graphics, and initial-conditions video are department-supplied project assets. This file makes no third-party ownership claim about those assets; their use and redistribution remain subject to the department's source rights.
 
-## 3. Realtime & Persistence
-*   **Zustand Store** - [MIT License](https://github.com/pmndrs/zustand/blob/main/LICENSE)
-*   **Dexie.js (IndexedDB wrapper)** - [Apache License 2.0](https://github.com/dexie/Dexie.js/blob/master/LICENSE)
-
-## 4. After-Action Reporting PDF
-*   **jsPDF** - [MIT License](https://github.com/parallax/jsPDF/blob/master/LICENSE)
-*   **jspdf-autotable** - [MIT License](https://github.com/simonbengtsson/jspdf-autotable/blob/master/LICENSE)
-
-## 5. Standard Graphics Assets
-*   **Kenney Assets (Racing, Tiny Town, Minimap Packs)** - [CC0 1.0 Universal (Public Domain)](https://creativecommons.org/publicdomain/zero/1.0/)
-    *   *No attribution required. Unlimited commercial and personal use.*
-*   **Game-icons.net (Tactical fire icons)** - [Creative Commons Attribution 3.0 (CC BY 3.0)](https://creativecommons.org/licenses/by/3.0/)
-    *   *Attribution requested. Free to share, remix, and use commercially.*
+Run `pnpm licenses list --prod` or inspect `pnpm-lock.yaml` and the packaged `LICENSE` files when producing a complete release notice for redistribution.

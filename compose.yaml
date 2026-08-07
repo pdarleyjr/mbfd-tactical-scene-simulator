@@ -1,0 +1,87 @@
+name: mbfd-tactical-scene-simulator
+
+services:
+  db:
+    image: postgres:18.4-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: firesim
+      POSTGRES_USER: firesim
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets:
+      - database_password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firesim -d firesim"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      COLLAB_PORT: 1234
+      DATABASE_HOST: db
+      DATABASE_USER: firesim
+      DATABASE_NAME: firesim
+      DATABASE_PASSWORD_FILE: /run/secrets/database_password
+      SESSION_SIGNING_SECRET_FILE: /run/secrets/session_signing_secret
+      INSTRUCTOR_PIN_FILE: /run/secrets/instructor_pin
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://firesim.mbfdhub.com}
+      APP_RELEASE: ${APP_RELEASE:-development}
+      ASSET_STORAGE_PATH: /data/assets
+      MIGRATIONS_PATH: /app/apps/server/drizzle
+    secrets:
+      - database_password
+      - session_signing_secret
+      - instructor_pin
+    volumes:
+      - ./data/assets:/data/assets
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    networks: [internal]
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8230}:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+    networks: [internal]
+
+secrets:
+  database_password:
+    file: ./secrets/database_password
+  session_signing_secret:
+    file: ./secrets/session_signing_secret
+  instructor_pin:
+    file: ./secrets/instructor_pin
+
+volumes:
+  postgres_data:
+
+networks:
+  internal:
+    driver: bridge
