@@ -5,7 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig
 COPY packages ./packages
 COPY apps/server ./apps/server
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @mbfd/domain build && pnpm --filter @mbfd/fire-model build && pnpm --filter @mbfd/collaboration build && pnpm --filter @mbfd/server build
+RUN pnpm exec tsc -b packages/domain packages/fire-model packages/collaboration apps/server --pretty false
 RUN pnpm --filter @mbfd/server deploy --prod /release
 
 FROM node:24.18.0-bookworm-slim AS runtime

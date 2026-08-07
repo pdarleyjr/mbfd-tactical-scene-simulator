@@ -5,7 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig
 COPY packages ./packages
 COPY apps/web ./apps/web
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @mbfd/domain build && pnpm --filter @mbfd/fire-model build && pnpm --filter @mbfd/collaboration build && pnpm --filter @mbfd/web build
+RUN pnpm exec tsc -b packages/domain packages/fire-model packages/collaboration apps/web --pretty false && pnpm --filter @mbfd/web exec vite build
 
 FROM caddy:2.10.2-alpine
 COPY Caddyfile /etc/caddy/Caddyfile
