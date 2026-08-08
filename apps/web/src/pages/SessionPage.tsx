@@ -36,7 +36,7 @@ export function SessionPage() {
   const background = scenario?.assets.find((asset) => asset.kind === 'background')
   const video = scenario?.assets.find((asset) => asset.kind === 'video')
 
-  if (!auth.token) return <main className="shell grid min-h-dvh place-items-center p-5 text-center"><div><h1 className="display text-3xl">Session sign-in required</h1><p className="muted mt-3">Use the incident code to join this tactical scene.</p><Link to="/" className="btn btn-primary mt-5 no-underline">Enter incident code</Link></div></main>
+  if (!auth.token) return <main className="shell grid min-h-dvh place-items-center p-5 text-center"><div><h1 className="display text-3xl">Participant setup required</h1><p className="muted mt-3">Use the six-character room code shown in the instructor console.</p><Link to="/" className="btn btn-primary mt-5 no-underline">Enter room code</Link></div></main>
   if (bootstrap.error && !bootstrap.data) return <main className="shell grid min-h-dvh place-items-center p-5"><p role="alert">{bootstrap.error.message}</p></main>
   if (bootstrap.isLoading || !scenario || !bootstrap.data) return <main className="shell grid min-h-dvh place-items-center"><p className="display">Loading tactical scene…</p></main>
 

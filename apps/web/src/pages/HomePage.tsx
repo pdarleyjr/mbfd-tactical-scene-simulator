@@ -23,7 +23,7 @@ export function HomePage() {
   function join(event: FormEvent) {
     event.preventDefault()
     const normalized = code.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6)
-    if (normalized.length !== 6) return setError('Enter the six-character incident code.')
+    if (normalized.length !== 6) return setError('Enter the six-character room code shown in the instructor console.')
     void navigate({ to: '/join/$code', params: { code: normalized } })
   }
 
@@ -41,7 +41,7 @@ export function HomePage() {
 
   return (
     <main className="shell min-h-dvh">
-      <header className="mx-auto flex max-w-6xl items-center justify-between p-5"><AppMark /><button className="btn btn-secondary" onClick={() => setShowInstructor((value) => !value)}><ClipboardPenLine size={19} /> Instructor</button></header>
+      <header className="mx-auto flex max-w-6xl items-center justify-between p-5"><AppMark /><button className="btn btn-secondary" onClick={() => setShowInstructor((value) => !value)}><ClipboardPenLine size={19} /> Instructor setup</button></header>
       <section className="mx-auto grid max-w-6xl gap-10 px-5 pb-12 pt-10 lg:grid-cols-[1.15fr_.85fr] lg:items-center lg:pt-20">
         <div>
           <p className="eyebrow mb-4">Miami Beach Fire Department</p>
@@ -52,13 +52,14 @@ export function HomePage() {
           </div>
         </div>
         <div className="panel p-5 md:p-7">
-          <p className="eyebrow">Enter an active incident</p>
-          <h2 className="display mb-5 mt-2 text-3xl">Join Session</h2>
+          <p className="eyebrow">Join a training room</p>
+          <h2 className="display mt-2 text-3xl">Enter room code</h2>
+          <p className="muted mb-5 mt-3 leading-relaxed">An instructor creates this six-character room code when starting a training session. It is not a password.</p>
           <form onSubmit={join} className="space-y-4">
-            <label className="block"><span className="mb-2 block font-semibold">Incident code</span><input className="field display text-center text-2xl tracking-[.3em]" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="ABC234" autoCapitalize="characters" autoComplete="off" maxLength={6} /></label>
-            <button className="btn btn-primary w-full" type="submit">Continue <ArrowRight size={19}/></button>
+            <label className="block"><span className="mb-2 block font-semibold">Training room code</span><input className="field display text-center text-2xl tracking-[.3em]" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="ABC234" autoCapitalize="characters" autoComplete="off" maxLength={6} /></label>
+            <button className="btn btn-primary w-full" type="submit">Continue to participant setup <ArrowRight size={19}/></button>
           </form>
-          {showInstructor && <form onSubmit={instructor} className="mt-6 border-t border-[#34434c] pt-5"><label><span className="mb-2 block font-semibold">Instructor PIN</span><input className="field" type="password" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} autoComplete="current-password" /></label><button className="btn btn-secondary mt-3 w-full" type="submit">Open scenario builder</button></form>}
+          {showInstructor && <form onSubmit={instructor} className="mt-6 border-t border-[#34434c] pt-5"><h3 className="display text-xl">Instructor setup</h3><p className="muted mb-4 mt-2 leading-relaxed">Enter the instructor code, choose a scenario, then select Create room. The new room code appears in the instructor console.</p><label><span className="mb-2 block font-semibold">Instructor code</span><input className="field" type="password" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} autoComplete="current-password" /></label><button className="btn btn-secondary mt-3 w-full" type="submit">Open instructor setup</button></form>}
           {error && <p className="mt-4 border-l-4 border-[#be241f] bg-[#2a1919] p-3" role="alert">{error}</p>}
         </div>
       </section>
