@@ -17,6 +17,7 @@ dist-ssr
 !.env.example
 .wrangler
 secrets/
+backups/
 coverage/
 playwright-report/
 test-results/
