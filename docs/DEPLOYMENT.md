@@ -73,4 +73,14 @@ Application rollback does not automatically reverse database migrations. Restore
 
 ## Cloudflare Tunnel change safety
 
-Back up the existing cloudflared configuration before editing. Add only the `firesim.mbfdhub.com` ingress rule above the terminal catch-all, validate with `cloudflared tunnel ingress validate`, and reload the existing service. Do not alter unrelated ingress rules, routes, DNS records, or Tailscale.
+`mbfdhub-gmktec` is a remotely managed tunnel. Its connector runs with a protected token file and consumes ingress configuration from Cloudflare; there is no local `config.yml` to edit. Do not convert it to a locally managed tunnel and do not restart the shared connector for a hostname-only change.
+
+The production route is:
+
+- tunnel: `mbfdhub-gmktec` (`20cb894c-a5b0-4149-bc11-1499d772401e`)
+- ingress: `firesim.mbfdhub.com` to `http://127.0.0.1:8230`
+- DNS: proxied CNAME to `20cb894c-a5b0-4149-bc11-1499d772401e.cfargotunnel.com`
+
+Before an ingress change, fetch the current remote configuration through the Cloudflare API and retain the complete response. Preserve every existing rule in order, insert any hostname rule immediately before the terminal `http_status:404` rule, and confirm the connector reports the new configuration version in `journalctl -u cloudflared`. The initial V2 cutover backups are stored with mode `600` in `backups/cloudflare-tunnel-config-v18-before-firesim.json` and `backups/cloudflare-firesim-worker-domain-before-cutover.json` on GMKtec.
+
+The legacy Worker deployment and `legacy-mvp-before-v2` source tag remain available for rollback. To restore the legacy edge path, remove the tunnel CNAME and reattach `firesim.mbfdhub.com` as a custom domain for the `mbfd-tactical-scene-simulator` Worker. Remove the tunnel ingress only after the Worker endpoint is healthy. Do not alter unrelated tunnel ingress rules, DNS records, the cloudflared service, or Tailscale.
