@@ -10,7 +10,7 @@ CREATE TABLE "training_rooms" (
 );
 --> statement-breakpoint
 INSERT INTO "training_rooms" ("id", "name", "created_at", "updated_at")
-SELECT "training_sessions"."id", "scenarios"."title" || ' Training Room', "training_sessions"."created_at", "training_sessions"."updated_at"
+SELECT "training_sessions"."id", "scenarios"."title" || ' — ' || to_char("training_sessions"."created_at" AT TIME ZONE 'America/New_York', 'YYYY-MM-DD HH24:MI'), "training_sessions"."created_at", "training_sessions"."updated_at"
 FROM "training_sessions"
 JOIN "scenarios" ON "scenarios"."id" = "training_sessions"."scenario_id";
 --> statement-breakpoint
