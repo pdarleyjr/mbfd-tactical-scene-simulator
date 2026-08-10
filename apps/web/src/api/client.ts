@@ -11,15 +11,17 @@ interface ApiOptions extends Omit<RequestInit, 'body'> {
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const { token, body, ...requestOptions } = options
+  const method = requestOptions.method?.toUpperCase() ?? 'GET'
+  const payload = body === undefined && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? {} : body
   const headers = new Headers(requestOptions.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const isFormData = body instanceof FormData
-  if (body !== undefined && !isFormData) headers.set('Content-Type', 'application/json')
+  const isFormData = payload instanceof FormData
+  if (payload !== undefined && !isFormData) headers.set('Content-Type', 'application/json')
   headers.set('Accept', 'application/json')
   const response = await fetch(path, {
     ...requestOptions,
     headers,
-    ...(body === undefined ? {} : { body: isFormData ? body : JSON.stringify(body) }),
+    ...(payload === undefined ? {} : { body: isFormData ? payload : JSON.stringify(payload) }),
   })
   const data = await response.json().catch(() => ({})) as { error?: string }
   if (!response.ok) throw new ApiError(data.error ?? `Request failed with status ${response.status}.`, response.status)
