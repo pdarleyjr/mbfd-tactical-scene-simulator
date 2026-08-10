@@ -29,17 +29,35 @@ async function join(browser: Browser, roomId: string, name: string, unit: string
   return { context, page }
 }
 
+async function expectNoPageScroll(page: import('@playwright/test').Page) {
+  const overflow = await page.evaluate(() => ({
+    horizontal: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    vertical: document.documentElement.scrollHeight - document.documentElement.clientHeight,
+    bodyHorizontal: document.body.scrollWidth - document.body.clientWidth,
+    bodyVertical: document.body.scrollHeight - document.body.clientHeight,
+  }))
+  expect(overflow, 'the browser document must remain a fixed, no-scroll workspace').toEqual({
+    horizontal: 0,
+    vertical: 0,
+    bodyHorizontal: 0,
+    bodyVertical: 0,
+  })
+}
+
 test('home lists instructor-authored scenario titles and touch targets remain usable', async ({ page, request }) => {
   const { room, scenario } = await createSession(request)
+  await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   await expect(page.getByRole('heading', { name: /Build the incident/ })).toBeVisible()
   await expect(page.getByText('Select the scenario title your instructor opened. A PIN appears only when that instructor chose to lock its room.')).toBeVisible()
   await page.getByRole('button', { name: 'Instructor setup' }).click()
   await expect(page.getByText(/Instructor PIN:/)).toContainText('2300')
+  await expectNoPageScroll(page)
   await expect(page.getByLabel('Available scenarios').locator(`option[value="${room.id}"]`)).toContainText(scenario.title)
   await page.getByLabel('Available scenarios').selectOption(room.id)
   await page.getByRole('button', { name: 'Continue to participant setup' }).click()
   await expect(page).toHaveURL(new RegExp(`/join/${room.id}$`))
+  await expectNoPageScroll(page)
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   expect(overflow).toBeLessThanOrEqual(1)
   const shortTargets = await page.locator('button:visible').evaluateAll((buttons) => buttons.filter((button) => button.getBoundingClientRect().height < 44).length)
@@ -62,10 +80,48 @@ test('instructor setup creates a named room and opens its console', async ({ pag
   await page.getByLabel('Instructor PIN').fill('2300')
   await page.getByRole('button', { name: 'Open instructor setup' }).click()
   await expect(page.getByRole('heading', { name: 'Edit scenario' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Room' }).click()
   await page.getByLabel('New room name').fill(roomName)
   await page.getByRole('button', { name: 'Open instructor console' }).click()
   await expect(page.getByRole('heading', { name: 'Session control' })).toBeVisible()
   await expect(page.getByText(`Instructor · ${roomName}`)).toBeVisible()
+})
+
+test('setup fits short laptop and phone windows without scrolling and keeps every editor reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 640 })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Instructor setup' }).click()
+  await page.getByLabel('Instructor PIN').fill('2300')
+  await page.getByRole('button', { name: 'Open instructor setup' }).click()
+  await expect(page.getByRole('heading', { name: 'Edit scenario' })).toBeVisible()
+  await expectNoPageScroll(page)
+
+  for (const tab of ['Details', 'Resources', 'Benchmarks', 'Injects', 'Map', 'Room']) {
+    await page.getByRole('tab', { name: tab }).click()
+    const panel = page.getByRole('tabpanel', { name: tab })
+    await expect(panel).toBeVisible()
+    await expectNoPageScroll(page)
+    const panelOverflow = await panel.evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+    expect(panelOverflow.x, `${tab} must not require horizontal panel scrolling`).toBeLessThanOrEqual(1)
+    expect(panelOverflow.y, `${tab} must not require vertical panel scrolling`).toBeLessThanOrEqual(1)
+  }
+
+  await page.getByRole('tab', { name: 'Map' }).click()
+  await expect(page.getByLabel('Interactive tactical scene map')).toBeVisible()
+  const initialZoom = await page.getByTestId('map-zoom-level').textContent()
+  await page.getByRole('button', { name: 'Zoom map in' }).click()
+  await expect(page.getByTestId('map-zoom-level')).not.toHaveText(initialZoom ?? '')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const tab of ['Details', 'Resources', 'Benchmarks', 'Injects', 'Map', 'Room']) {
+    await page.getByRole('tab', { name: tab }).click()
+    const panel = page.getByRole('tabpanel', { name: tab })
+    await expect(panel).toBeVisible()
+    await expectNoPageScroll(page)
+    const panelOverflow = await panel.evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+    expect(panelOverflow.x, `${tab} phone panel must not require horizontal scrolling`).toBeLessThanOrEqual(1)
+    expect(panelOverflow.y, `${tab} phone panel must not require vertical scrolling`).toBeLessThanOrEqual(1)
+  }
 })
 
 test('instructor can create, rename, duplicate, and remove scenarios from the titled library', async ({ page }) => {
@@ -76,8 +132,11 @@ test('instructor can create, rename, duplicate, and remove scenarios from the ti
   await page.getByLabel('Instructor PIN').fill('2300')
   await page.getByRole('button', { name: 'Open instructor setup' }).click()
   await page.getByRole('button', { name: 'Create new scenario' }).click()
+  await page.getByRole('tab', { name: 'Benchmarks' }).click()
   await expect(page.getByLabel('Benchmark 1 label')).toHaveValue('Command established')
+  await page.getByRole('navigation', { name: 'Benchmark pages' }).getByRole('button', { name: 'Next' }).click()
   await expect(page.getByLabel('Benchmark 5 label')).toHaveValue('Primary search complete')
+  await page.getByRole('tab', { name: 'Details' }).click()
   await page.getByLabel('Scenario title').fill(title)
   await page.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByLabel('Scenario library')).toContainText(title)
@@ -96,6 +155,8 @@ test('instructor timer controls and presentation link work without clipboard per
   await context.grantPermissions([])
   await page.addInitScript(({ token }) => { sessionStorage.setItem('mbfd-firesim-instructor-token', token) }, { token: instructorToken })
   await page.goto(`/instructor/${session.id}`)
+  await expectNoPageScroll(page)
+  await expect(page.getByRole('tab', { name: 'Session' })).toBeVisible()
   await expect(page.getByTestId('scenario-timer')).toHaveText('00:00')
   await page.getByRole('button', { name: 'Start' }).click()
   await expect(page.getByRole('button', { name: 'Freeze' })).toBeEnabled()
@@ -105,11 +166,65 @@ test('instructor timer controls and presentation link work without clipboard per
   await page.waitForTimeout(1200)
   await expect(page.getByTestId('scenario-timer')).toHaveText(frozen ?? '')
   await page.getByRole('button', { name: 'Resume' }).click()
+  await page.getByRole('tab', { name: 'Display' }).click()
   await page.getByLabel('Display view').selectOption('split')
   await expect(page.getByLabel('Display view')).toHaveValue('split')
   await page.getByRole('button', { name: 'Generate display link' }).click()
   await expect(page.getByLabel('Presentation link')).toHaveValue(new RegExp(`/present/${session.id}#token=`))
   await expect(page.getByRole('link', { name: 'Open display' })).toHaveAttribute('href', new RegExp(`/present/${session.id}#token=`))
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const tab of ['Session', 'Units', 'Benchmarks', 'Display', 'More']) {
+    await page.getByRole('tab', { name: tab }).click()
+    const panel = page.getByRole('tabpanel', { name: tab })
+    await expect(panel).toBeVisible()
+    await expectNoPageScroll(page)
+    const panelOverflow = await panel.evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+    expect(panelOverflow.x, `${tab} instructor controls must fit the phone width`).toBeLessThanOrEqual(1)
+    expect(panelOverflow.y, `${tab} instructor controls must fit the phone height`).toBeLessThanOrEqual(1)
+  }
+})
+
+test('presentation keeps the live map and benchmark/task table visible without page scrolling', async ({ page, request }) => {
+  const { instructorToken, room, scenario, session } = await createSession(request, 'live')
+  await startAndArrive(request, instructorToken, session.id, ['E1'])
+  const participant = await request.post('/api/sessions/join', {
+    data: { sessionId: session.id, name: 'Live Table Firefighter', role: 'crew', unit: 'E1', clientId: `display-e2e-${Date.now()}` },
+  })
+  expect(participant.ok()).toBeTruthy()
+  const participantToken = (await participant.json()).token as string
+  const display = await request.post(`/api/sessions/${session.id}/presentation-token`, {
+    headers: { authorization: `Bearer ${instructorToken}` },
+  })
+  const displayToken = (await display.json()).token as string
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.goto(`/present/${session.id}#token=${encodeURIComponent(displayToken)}`)
+  await expect(page.getByLabel('Interactive tactical scene map')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Live activity' })).toBeVisible()
+  const started = await request.post(`/api/sessions/${session.id}/evolutions`, {
+    headers: { authorization: `Bearer ${participantToken}` },
+    data: { evolutionId: 'jumpline' },
+  })
+  expect(started.ok()).toBeTruthy()
+  const benchmarkId = scenario.benchmarks[0]!.id
+  await request.patch(`/api/sessions/${session.id}/benchmarks/${benchmarkId}`, {
+    headers: { authorization: `Bearer ${instructorToken}` },
+    data: { completed: true },
+  })
+  await expect(page.getByRole('table', { name: 'Live benchmark and task activity' })).toContainText('Jumpline')
+  await expect(page.getByRole('table', { name: 'Live benchmark and task activity' })).toContainText('Command established')
+  await expect(page.getByText(room.name)).toBeVisible()
+  await expectNoPageScroll(page)
+
+  const initialZoom = await page.getByTestId('map-zoom-level').textContent()
+  await page.getByRole('button', { name: 'Zoom map in' }).click()
+  await expect(page.getByTestId('map-zoom-level')).not.toHaveText(initialZoom ?? '')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('heading', { name: 'Live activity' })).toBeVisible()
+  await expectNoPageScroll(page)
+  const activityOverflow = await page.locator('.live-activity').evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+  expect(activityOverflow.x).toBeLessThanOrEqual(1)
+  expect(activityOverflow.y).toBeLessThanOrEqual(1)
 })
 
 test('participants remain staged until arrival, then can timestamp an evolution', async ({ page, request }) => {
@@ -122,6 +237,10 @@ test('participants remain staged until arrival, then can timestamp an evolution'
   await expect(page.getByRole('heading', { name: 'Scenario will load once you make arrival' })).toBeVisible()
   await request.patch(`/api/sessions/${session.id}/units/E1`, { headers: { authorization: `Bearer ${instructorToken}` }, data: { status: 'arrived' } })
   await expect(page.getByLabel('Interactive tactical scene map')).toBeVisible()
+  await expectNoPageScroll(page)
+  const railOverflow = await page.locator('.incident-rail').evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+  expect(railOverflow.x).toBeLessThanOrEqual(1)
+  expect(railOverflow.y).toBeLessThanOrEqual(1)
   await page.getByRole('button', { name: /Jumpline/ }).click()
   await expect(page.getByRole('button', { name: 'Hydrant' })).toHaveCount(0)
   await expect(page.getByText('Active evolution · E1')).toBeVisible()
@@ -136,6 +255,28 @@ test('participants remain staged until arrival, then can timestamp an evolution'
   await expect(page.getByTestId('object-count')).toHaveText('1 tactical objects')
   await page.getByRole('button', { name: 'Mark complete' }).click()
   await expect(page.getByText(/Jumpline complete/)).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectNoPageScroll(page)
+  for (const selector of ['.incident-rail', '.context-bar']) {
+    const overflow = await page.locator(selector).evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+    expect(overflow.x, `${selector} must fit a phone without scrolling`).toBeLessThanOrEqual(1)
+    expect(overflow.y, `${selector} must fit a phone without scrolling`).toBeLessThanOrEqual(1)
+  }
+})
+
+test('after-action review uses pagination instead of document or panel scrolling', async ({ page, request }) => {
+  const { instructorToken, session } = await createSession(request)
+  await page.addInitScript(({ token }) => { sessionStorage.setItem('mbfd-firesim-instructor-token', token) }, { token: instructorToken })
+  await page.setViewportSize({ width: 1024, height: 640 })
+  await page.goto(`/review/${session.id}`)
+  await expect(page.getByRole('heading', { name: 'Playback state' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Timeline' })).toBeVisible()
+  await expectNoPageScroll(page)
+  const overflow = await page.locator('.timeline-panel').evaluate((element) => ({ x: element.scrollWidth - element.clientWidth, y: element.scrollHeight - element.clientHeight }))
+  expect(overflow.x).toBeLessThanOrEqual(1)
+  expect(overflow.y).toBeLessThanOrEqual(1)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expectNoPageScroll(page)
 })
 
 test('two companies converge on Operations while Independent 300 remains isolated', async ({ browser, request }) => {

@@ -50,3 +50,19 @@ export function zoomAroundPoint(
     y: anchor.y - worldAnchor.y * scale,
   }
 }
+
+export function pinchViewport(
+  viewport: ViewportTransform,
+  previous: { distance: number; center: Point },
+  next: { distance: number; center: Point },
+  limits = { min: 0.15, max: 6 },
+): ViewportTransform {
+  if (previous.distance <= 0 || next.distance <= 0) return viewport
+  const scale = Math.min(limits.max, Math.max(limits.min, viewport.scale * next.distance / previous.distance))
+  const worldAnchor = screenToWorld(previous.center, viewport)
+  return {
+    scale,
+    x: next.center.x - worldAnchor.x * scale,
+    y: next.center.y - worldAnchor.y * scale,
+  }
+}

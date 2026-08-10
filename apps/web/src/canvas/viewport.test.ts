@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fitWorldToViewport, screenToWorld, zoomAroundPoint } from './viewport.js'
+import { fitWorldToViewport, pinchViewport, screenToWorld, zoomAroundPoint } from './viewport.js'
 
 describe('canvas viewport transforms', () => {
   it('fits the supplied 1586×992 world without distorting its aspect ratio', () => {
@@ -21,5 +21,17 @@ describe('canvas viewport transforms', () => {
     const after = screenToWorld(anchor, zoomed)
     expect(after.x).toBeCloseTo(before.x)
     expect(after.y).toBeCloseTo(before.y)
+  })
+
+  it('combines two-finger pinch zoom and pan without moving the anchored world point', () => {
+    const initial = { x: 20, y: 30, scale: 1 }
+    const previous = { distance: 100, center: { x: 200, y: 160 } }
+    const next = { distance: 180, center: { x: 240, y: 190 } }
+    const anchoredWorldPoint = screenToWorld(previous.center, initial)
+    const pinched = pinchViewport(initial, previous, next)
+
+    expect(pinched.scale).toBeCloseTo(1.8)
+    expect(screenToWorld(next.center, pinched).x).toBeCloseTo(anchoredWorldPoint.x)
+    expect(screenToWorld(next.center, pinched).y).toBeCloseTo(anchoredWorldPoint.y)
   })
 })

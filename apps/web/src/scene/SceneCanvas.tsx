@@ -1,12 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Circle, Layer, Stage } from 'react-konva'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, RotateCcw, RotateCw, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Crosshair, Minus, Plus, RotateCcw, RotateCw, Undo2, X } from 'lucide-react'
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { ConnectionPoint, FiregroundObject } from '@mbfd/domain'
 import { canConnect } from '@mbfd/fire-model'
 import { createApparatus, createHydrant, moveObject, type SceneActor } from './actions'
-import { fitWorldToViewport, screenToWorld, zoomAroundPoint, type ViewportTransform } from '../canvas/viewport'
+import { fitWorldToViewport, pinchViewport, screenToWorld, zoomAroundPoint, type ViewportTransform } from '../canvas/viewport'
 import { BackgroundLayer } from './layers/BackgroundLayer'
 import { HoseDraftLayer, HoseLayer } from './layers/HoseLayer'
 import { hoseStyles } from './layers/hoseStyles'
@@ -20,6 +20,8 @@ export interface SceneCanvasHandle {
   placeTemplateAtClientPoint: (templateId: string, point: { x: number; y: number }) => boolean
   placeAtCenter: (templateId: string) => void
   fit: () => void
+  zoomIn: () => void
+  zoomOut: () => void
 }
 
 interface Props {
@@ -51,6 +53,7 @@ function hoseTypeFromMode(mode: CanvasMode) {
 export const SceneCanvas = forwardRef<SceneCanvasHandle, Props>(function SceneCanvas(props, ref) {
   const hostRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
+  const pinchRef = useRef<{ distance: number; center: { x: number; y: number } } | undefined>(undefined)
   const [size, setSize] = useState({ width: 800, height: 600 })
   const [view, setView] = useState<ViewportTransform>(() => fitWorldToViewport(props.world, size, 18))
   const [draft, setDraft] = useState<number[]>([])
@@ -66,6 +69,9 @@ export const SceneCanvas = forwardRef<SceneCanvasHandle, Props>(function SceneCa
   const draftLengthFeet = draftLengthWorld * (props.feetPerWorldUnit ?? 1)
 
   function fit() { setView(fitWorldToViewport(props.world, size, 18)) }
+  function zoom(factor: number) {
+    setView((current) => zoomAroundPoint(current, { x: size.width / 2, y: size.height / 2 }, current.scale * factor, { min: .05, max: 8 }))
+  }
 
   useEffect(() => {
     const host = hostRef.current
@@ -105,7 +111,40 @@ export const SceneCanvas = forwardRef<SceneCanvasHandle, Props>(function SceneCa
     },
     placeAtCenter(templateId) { placeTemplate(templateId, screenToWorld({ x: size.width / 2, y: size.height / 2 }, view)) },
     fit,
+    zoomIn() { zoom(1.2) },
+    zoomOut() { zoom(1 / 1.2) },
   }))
+
+  function touchGeometry(touches: TouchList) {
+    if (touches.length < 2) return undefined
+    const bounds = hostRef.current?.getBoundingClientRect()
+    if (!bounds) return undefined
+    const first = touches.item(0)
+    const second = touches.item(1)
+    if (!first || !second) return undefined
+    return {
+      distance: Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY),
+      center: { x: (first.clientX + second.clientX) / 2 - bounds.left, y: (first.clientY + second.clientY) / 2 - bounds.top },
+    }
+  }
+
+  function beginPinch(event: KonvaEventObject<TouchEvent>) {
+    const geometry = touchGeometry(event.evt.touches)
+    if (!geometry) return
+    event.evt.preventDefault()
+    event.target.getStage()?.stopDrag()
+    pinchRef.current = geometry
+  }
+
+  function movePinch(event: KonvaEventObject<TouchEvent>) {
+    const previous = pinchRef.current
+    const next = touchGeometry(event.evt.touches)
+    if (!previous || !next || previous.distance <= 0) return
+    event.evt.preventDefault()
+    event.target.getStage()?.stopDrag()
+    setView((current) => pinchViewport(current, previous, next, { min: .05, max: 8 }))
+    pinchRef.current = next
+  }
 
   function canMove(object: FiregroundObject) {
     return !props.readOnly && (object.createdByClientId === props.actor.clientId || object.createdByUnit === props.actor.unit || props.actor.unit === '300' || props.actor.unit === 'INSTRUCTOR')
@@ -212,6 +251,7 @@ export const SceneCanvas = forwardRef<SceneCanvasHandle, Props>(function SceneCa
   return <div ref={hostRef} className="canvas-host" tabIndex={0} aria-label="Interactive tactical scene map" onKeyDown={(event) => { if (event.key === 'Enter' && props.placementTemplateId) placeTemplate(props.placementTemplateId, screenToWorld({ x: size.width / 2, y: size.height / 2 }, view)); if (event.key === 'Escape') setDraft([]); if (selectedApparatus && ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)) { event.preventDefault(); const amount = event.shiftKey ? 10 : 2; transformApparatus(selectedApparatus, { x: selectedApparatus.x + (event.key === 'ArrowLeft' ? -amount : event.key === 'ArrowRight' ? amount : 0), y: selectedApparatus.y + (event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0) }) } }}>
     <Stage ref={stageRef} width={size.width} height={size.height} x={view.x} y={view.y} scaleX={view.scale} scaleY={view.scale}
       draggable={props.mode === 'pan'} onPointerDown={handleStagePointer} onPointerMove={handleStagePointer}
+      onTouchStart={beginPinch} onTouchMove={movePinch} onTouchEnd={(event) => { if (event.evt.touches.length < 2) pinchRef.current = undefined }} onTouchCancel={() => { pinchRef.current = undefined }}
       onDragEnd={(event) => { if (event.target === stageRef.current) setView((current) => ({ ...current, x: event.target.x(), y: event.target.y() })) }}
       onWheel={(event) => { event.evt.preventDefault(); const stage = event.target.getStage(); const pointer = stage?.getPointerPosition(); if (!pointer) return; setView((current) => zoomAroundPoint(current, pointer, current.scale * (event.evt.deltaY > 0 ? .9 : 1.1), { min: .05, max: 8 })) }}>
       <BackgroundLayer source={props.backgroundUrl} width={props.world.width} height={props.world.height}/>
@@ -223,6 +263,7 @@ export const SceneCanvas = forwardRef<SceneCanvasHandle, Props>(function SceneCa
       <HoseDraftLayer points={draft} hoseType={hoseTypeFromMode(props.mode)}/>
       {snap && <Layer listening={false}><Circle x={snap.x} y={snap.y} radius={15 / view.scale} stroke="#45a179" strokeWidth={4 / view.scale} fill="rgba(69,161,121,.28)"/></Layer>}
     </Stage>
+    <div className="map-zoom-controls" aria-label="Map zoom controls"><button type="button" className="map-zoom-button" aria-label="Zoom map out" onClick={() => zoom(1 / 1.2)}><Minus size={19}/></button><output className="map-zoom-level" data-testid="map-zoom-level" aria-live="polite">{Math.round(view.scale * 100)}%</output><button type="button" className="map-zoom-button" aria-label="Zoom map in" onClick={() => zoom(1.2)}><Plus size={19}/></button><button type="button" className="map-zoom-button" aria-label="Fit map to window" onClick={fit}><Crosshair size={18}/></button></div>
     {selectedApparatus && canMove(selectedApparatus) && props.mode === 'select' && <section className="absolute bottom-3 left-3 z-20 max-w-[calc(100%-1.5rem)] border border-[#57a8df] bg-[#111a1f]/95 p-3 shadow-2xl" aria-label="Selected apparatus positioning controls"><div className="mb-2 flex items-center justify-between gap-4"><span><strong className="display block">{selectedApparatus.apparatusTemplateId} positioning</strong><small className="muted">Drag to move · blue handle rotates · arrows nudge 2 units</small></span><output className="display min-w-14 text-right">{Math.round(selectedApparatus.rotation)}°</output></div><div className="flex flex-wrap gap-2"><div className="grid grid-cols-3 gap-1"><span/><button className="btn btn-secondary !h-12 !w-12 !p-0" aria-label="Nudge apparatus up" onClick={() => transformApparatus(selectedApparatus,{y:selectedApparatus.y-2})}><ArrowUp/></button><span/><button className="btn btn-secondary !h-12 !w-12 !p-0" aria-label="Nudge apparatus left" onClick={() => transformApparatus(selectedApparatus,{x:selectedApparatus.x-2})}><ArrowLeft/></button><button className="btn btn-secondary !h-12 !w-12 !p-0" aria-label="Nudge apparatus down" onClick={() => transformApparatus(selectedApparatus,{y:selectedApparatus.y+2})}><ArrowDown/></button><button className="btn btn-secondary !h-12 !w-12 !p-0" aria-label="Nudge apparatus right" onClick={() => transformApparatus(selectedApparatus,{x:selectedApparatus.x+2})}><ArrowRight/></button></div><div className="flex flex-wrap content-start gap-1"><button className="btn btn-secondary !h-12 !px-3" onClick={() => transformApparatus(selectedApparatus,{rotation:selectedApparatus.rotation-15})}><RotateCcw size={18}/>15°</button><button className="btn btn-secondary !h-12 !px-3" onClick={() => transformApparatus(selectedApparatus,{rotation:selectedApparatus.rotation-1})}>−1°</button><button className="btn btn-secondary !h-12 !px-3" onClick={() => transformApparatus(selectedApparatus,{rotation:selectedApparatus.rotation+1})}>+1°</button><button className="btn btn-secondary !h-12 !px-3" onClick={() => transformApparatus(selectedApparatus,{rotation:selectedApparatus.rotation+15})}><RotateCw size={18}/>15°</button></div></div></section>}
     {props.mode.startsWith('hose-') && <section className="absolute bottom-3 right-3 z-20 w-[min(94%,460px)] border border-[#53646e] bg-[#111a1f]/95 p-3 shadow-2xl"><div className="flex items-start gap-3"><span className="mt-1 h-5 w-5 shrink-0 rounded-full border-2 border-black" style={{background:hoseStyles[hoseTypeFromMode(props.mode)].color}}/><div className="min-w-0 flex-1"><strong className="display block">Draw {hoseStyles[hoseTypeFromMode(props.mode)].label}</strong><small className="muted block">Click or tap the map once for the start. Keep clicking each point you want the hose to follow, then select Finish line.</small></div><output className="display whitespace-nowrap">{Math.round(draftLengthFeet)} ft{props.feetPerWorldUnit ? '' : '*'}</output></div><p className="mt-2 border-l-4 border-[#57a8df] bg-[#1d2a32] p-2 text-sm" role="status" data-testid="hose-point-count">{draft.length === 0 ? 'Place the first point on the map.' : draft.length === 2 ? 'Start placed. Click the next point.' : `${draft.length / 2} points connected. Keep clicking or finish the line.`}</p>{props.mode === 'hose-hose3' && <fieldset className="mt-3"><legend className="sr-only">3-inch hose purpose</legend><div className="grid grid-cols-2 gap-2"><button className={`btn ${hose3Purpose === 'attack' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setHose3Purpose('attack')}>Attack line</button><button className={`btn ${hose3Purpose === 'supply' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setHose3Purpose('supply')}>Supply / feeder</button></div></fieldset>}<div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3"><button className="btn btn-secondary" disabled={!draft.length} onClick={undoHosePoint}><Undo2 size={18}/>Undo point</button><button className="btn btn-secondary" disabled={!draft.length} onClick={cancelHose}><X size={18}/>Cancel line</button><button className="btn btn-primary col-span-2 sm:col-span-1" disabled={draft.length < 4} onClick={() => finishHose(draft)}>Finish line</button></div>{!props.feetPerWorldUnit && <small className="muted mt-2 block">*Length uses map units until an instructor enters the scenario’s feet-per-unit calibration.</small>}</section>}
   </div>
