@@ -110,6 +110,19 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     return { items: items.map(scenarioResponse) }
   })
 
+  app.get('/api/instructor/library', async (request) => {
+    verifyControllerToken(bearerToken(request), options.signingSecret)
+    const scenarios = await options.repository.listScenarios(true)
+    const rooms = await options.repository.listRooms()
+    return {
+      scenarios: scenarios.map(scenarioResponse),
+      rooms: (await Promise.all(rooms.map(async (room) => ({
+        ...(await publicRoomResponse(room)),
+        archived: room.archived,
+      })))).filter(Boolean),
+    }
+  })
+
   app.get<{ Params: { id: string } }>('/api/scenarios/:id', async (request, reply) => {
     const scenario = await options.repository.getScenario(request.params.id)
     if (!scenario) return reply.code(404).send({ error: 'Scenario not found.' })
@@ -136,6 +149,13 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     verifyControllerToken(bearerToken(request), options.signingSecret)
     const deleted = await options.repository.deleteScenario(request.params.id)
     return deleted ? reply.code(204).send() : reply.code(404).send({ error: 'Scenario not found.' })
+  })
+
+  app.post<{ Params: { id: string } }>('/api/scenarios/:id/restore', async (request, reply) => {
+    verifyControllerToken(bearerToken(request), options.signingSecret)
+    const scenario = await options.repository.setScenarioArchived(request.params.id, false)
+    if (!scenario) return reply.code(404).send({ error: 'Scenario not found.' })
+    return scenarioResponse(scenario)
   })
 
   app.post<{ Params: { id: string } }>('/api/scenarios/:id/duplicate', async (request, reply) => {
@@ -190,6 +210,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       id: room.id,
       name: room.name,
       locked: Boolean(room.accessPinHash),
+      archived: room.archived,
       updatedAt: room.updatedAt,
       ...(currentSession ? { currentSession: { id: currentSession.id, status: currentSession.status, participatingUnits: currentSession.participatingUnits, scenarioTitle: scenario?.title ?? 'Training scenario' } } : {}),
     }
@@ -210,7 +231,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     verifyControllerToken(bearerToken(request), options.signingSecret)
     const input = createRoomInputSchema.parse(request.body)
     const room = await options.repository.createRoom({ name: input.name, ...(input.accessPin ? { accessPinHash: hashRoomPin(input.accessPin) } : {}) })
-    return reply.code(201).send({ id: room.id, name: room.name, locked: Boolean(room.accessPinHash), updatedAt: room.updatedAt })
+    return reply.code(201).send({ id: room.id, name: room.name, locked: Boolean(room.accessPinHash), archived: room.archived, updatedAt: room.updatedAt })
   })
 
   app.patch<{ Params: { id: string } }>('/api/rooms/:id', async (request, reply) => {
@@ -223,7 +244,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       ...(input.archived !== undefined ? { archived: input.archived } : {}),
     })
     if (!room) return reply.code(404).send({ error: 'Training room not found.' })
-    return { id: room.id, name: room.name, locked: Boolean(room.accessPinHash), updatedAt: room.updatedAt }
+    return { id: room.id, name: room.name, locked: Boolean(room.accessPinHash), archived: room.archived, updatedAt: room.updatedAt }
   })
 
   app.post('/api/sessions', async (request, reply) => {

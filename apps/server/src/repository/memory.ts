@@ -28,8 +28,8 @@ export class MemoryRepository implements TacticalRepository {
   async initialize(): Promise<void> {}
   async close(): Promise<void> {}
 
-  async listScenarios(): Promise<ScenarioRecord[]> {
-    return [...this.scenarios.values()].filter((scenario) => !scenario.archived).map((scenario) => structuredClone(scenario))
+  async listScenarios(includeArchived = false): Promise<ScenarioRecord[]> {
+    return [...this.scenarios.values()].filter((scenario) => includeArchived || !scenario.archived).map((scenario) => structuredClone(scenario))
   }
 
   async getScenario(id: string): Promise<ScenarioRecord | undefined> {
@@ -66,6 +66,14 @@ export class MemoryRepository implements TacticalRepository {
     current.archived = true
     current.updatedAt = new Date().toISOString()
     return true
+  }
+
+  async setScenarioArchived(id: string, archived: boolean): Promise<ScenarioRecord | undefined> {
+    const current = this.scenarios.get(id)
+    if (!current) return undefined
+    current.archived = archived
+    current.updatedAt = new Date().toISOString()
+    return structuredClone(current)
   }
 
   async addScenarioAsset(asset: ScenarioAssetRecord): Promise<void> {

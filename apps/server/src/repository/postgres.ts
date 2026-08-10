@@ -114,8 +114,11 @@ export class PostgresRepository implements TacticalRepository {
     }
   }
 
-  async listScenarios(): Promise<ScenarioRecord[]> {
-    const rows = await this.db.select().from(schema.scenarios).where(eq(schema.scenarios.archived, false)).orderBy(desc(schema.scenarios.updatedAt))
+  async listScenarios(includeArchived = false): Promise<ScenarioRecord[]> {
+    const query = this.db.select().from(schema.scenarios)
+    const rows = includeArchived
+      ? await query.orderBy(desc(schema.scenarios.updatedAt))
+      : await query.where(eq(schema.scenarios.archived, false)).orderBy(desc(schema.scenarios.updatedAt))
     return Promise.all(rows.map((row) => this.scenarioFromRow(row)))
   }
 
@@ -159,6 +162,11 @@ export class PostgresRepository implements TacticalRepository {
   async deleteScenario(id: string): Promise<boolean> {
     const rows = await this.db.update(schema.scenarios).set({ archived: true, updatedAt: new Date() }).where(eq(schema.scenarios.id, id)).returning({ id: schema.scenarios.id })
     return rows.length > 0
+  }
+
+  async setScenarioArchived(id: string, archived: boolean): Promise<ScenarioRecord | undefined> {
+    await this.db.update(schema.scenarios).set({ archived, updatedAt: new Date() }).where(eq(schema.scenarios.id, id))
+    return this.getScenario(id)
   }
 
   async addScenarioAsset(asset: ScenarioAssetRecord): Promise<void> {

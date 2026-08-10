@@ -4,11 +4,12 @@ import type { EvolutionRunRecord, ParticipantRecord, RoomRecord, ScenarioAssetRe
 export interface TacticalRepository {
   initialize(): Promise<void>
   close(): Promise<void>
-  listScenarios(): Promise<ScenarioRecord[]>
+  listScenarios(includeArchived?: boolean): Promise<ScenarioRecord[]>
   getScenario(id: string): Promise<ScenarioRecord | undefined>
   createScenario(input: ScenarioInput & { id?: string; slug?: string }): Promise<ScenarioRecord>
   updateScenario(id: string, input: Partial<ScenarioInput>): Promise<ScenarioRecord | undefined>
   deleteScenario(id: string): Promise<boolean>
+  setScenarioArchived(id: string, archived: boolean): Promise<ScenarioRecord | undefined>
   addScenarioAsset(asset: ScenarioAssetRecord): Promise<void>
   createRoom(input: { name: string; accessPinHash?: string }): Promise<RoomRecord>
   listRooms(): Promise<RoomRecord[]>

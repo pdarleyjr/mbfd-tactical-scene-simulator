@@ -7,6 +7,7 @@ const SessionPage = lazyRouteComponent(() => import('./pages/SessionPage'), 'Ses
 const InstructorPage = lazyRouteComponent(() => import('./pages/InstructorPage'), 'InstructorPage')
 const PresentationPage = lazyRouteComponent(() => import('./pages/PresentationPage'), 'PresentationPage')
 const BuilderPage = lazyRouteComponent(() => import('./pages/BuilderPage'), 'BuilderPage')
+const InstructorSetupPage = lazyRouteComponent(() => import('./pages/InstructorSetupPage'), 'InstructorSetupPage')
 const ReviewPage = lazyRouteComponent(() => import('./pages/ReviewPage'), 'ReviewPage')
 
 const rootRoute = createRootRoute({ component: Outlet, notFoundComponent: NotFoundPage })
@@ -16,7 +17,7 @@ const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/session/$sessionId', component: SessionPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/instructor/$sessionId', component: InstructorPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/present/$sessionId', component: PresentationPage }),
-  createRoute({ getParentRoute: () => rootRoute, path: '/builder', component: BuilderPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/builder', component: InstructorSetupPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/builder/$scenarioId', component: BuilderPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/review/$sessionId', component: ReviewPage }),
 ])

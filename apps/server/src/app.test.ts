@@ -80,6 +80,42 @@ describe('session and authorization API', () => {
     await app.close()
   })
 
+  it('gives instructors a recoverable library of active and closed rooms and scenarios', async () => {
+    const { app } = await setup()
+    const login = await app.inject({ method: 'POST', url: '/api/instructor/session', payload: { pin: '246810' } })
+    const authorization = { authorization: `Bearer ${login.json().token as string}` }
+    const sourceScenario = (await app.inject({ method: 'GET', url: '/api/scenarios' })).json().items[0]
+    const duplicate = await app.inject({ method: 'POST', url: `/api/scenarios/${sourceScenario.id}/duplicate`, headers: authorization })
+    const room = await app.inject({ method: 'POST', url: '/api/rooms', headers: authorization, payload: { name: 'Recoverable Training Room' } })
+
+    expect((await app.inject({ method: 'DELETE', url: `/api/scenarios/${duplicate.json().id}`, headers: authorization })).statusCode).toBe(204)
+    expect((await app.inject({ method: 'PATCH', url: `/api/rooms/${room.json().id}`, headers: authorization, payload: { archived: true } })).statusCode).toBe(200)
+
+    const publicScenarios = await app.inject({ method: 'GET', url: '/api/scenarios' })
+    const publicRooms = await app.inject({ method: 'GET', url: '/api/rooms' })
+    expect(publicScenarios.json().items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: duplicate.json().id })]))
+    expect(publicRooms.json().items).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: room.json().id })]))
+
+    const library = await app.inject({ method: 'GET', url: '/api/instructor/library', headers: authorization })
+    expect(library.statusCode).toBe(200)
+    expect(library.json().scenarios).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: sourceScenario.id, archived: false }),
+      expect.objectContaining({ id: duplicate.json().id, archived: true }),
+    ]))
+    expect(library.json().rooms).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: room.json().id, name: 'Recoverable Training Room', archived: true }),
+    ]))
+
+    const restoredScenario = await app.inject({ method: 'POST', url: `/api/scenarios/${duplicate.json().id}/restore`, headers: authorization })
+    const restoredRoom = await app.inject({ method: 'PATCH', url: `/api/rooms/${room.json().id}`, headers: authorization, payload: { archived: false } })
+    expect(restoredScenario.statusCode).toBe(200)
+    expect(restoredScenario.json()).toEqual(expect.objectContaining({ id: duplicate.json().id, archived: false }))
+    expect(restoredRoom.json()).toEqual(expect.objectContaining({ id: room.json().id, archived: false }))
+    expect((await app.inject({ method: 'GET', url: '/api/scenarios' })).json().items).toEqual(expect.arrayContaining([expect.objectContaining({ id: duplicate.json().id })]))
+    expect((await app.inject({ method: 'GET', url: '/api/rooms' })).json().items).toEqual(expect.arrayContaining([expect.objectContaining({ id: room.json().id })]))
+    await app.close()
+  })
+
   it('gates work by instructor-recorded arrival and timestamps evolutions and benchmarks', async () => {
     const { app } = await setup()
     const login = await app.inject({ method: 'POST', url: '/api/instructor/session', payload: { pin: '246810' } })

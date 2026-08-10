@@ -16,6 +16,7 @@ export interface ScenarioView extends ScenarioInput {
   assets: ScenarioAssetView[]
   backgroundAssetId?: string
   videoAssetId?: string
+  archived: boolean
   createdAt: string
   updatedAt: string
 }
@@ -37,6 +38,7 @@ export interface RoomView {
   id: string
   name: string
   locked: boolean
+  archived: boolean
   updatedAt: string
   currentSession?: Pick<SessionView, 'id' | 'status' | 'participatingUnits'> & { scenarioTitle: string }
 }

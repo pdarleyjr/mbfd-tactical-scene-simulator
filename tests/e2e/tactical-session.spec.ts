@@ -79,12 +79,30 @@ test('instructor setup creates a named room and opens its console', async ({ pag
   await page.getByRole('button', { name: 'Instructor setup' }).click()
   await page.getByLabel('Instructor PIN').fill('2300')
   await page.getByRole('button', { name: 'Open instructor setup' }).click()
-  await expect(page.getByRole('heading', { name: 'Edit scenario' })).toBeVisible()
-  await page.getByRole('tab', { name: 'Room' }).click()
+  await expect(page.getByRole('heading', { name: 'Open a training room' })).toBeVisible()
+  await expect(page.getByLabel('Scenario')).toHaveValue('11111111-1111-4111-8111-111111111111')
+  await expect(page.getByLabel('Scenario').locator('option:checked')).toContainText('Waterfront')
   await page.getByLabel('New room name').fill(roomName)
   await page.getByRole('button', { name: 'Open instructor console' }).click()
   await expect(page.getByRole('heading', { name: 'Session control' })).toBeVisible()
   await expect(page.getByText(`Instructor · ${roomName}`)).toBeVisible()
+})
+
+test('instructor can close and restore a training room without losing it', async ({ page, request }) => {
+  const roomName = `Recoverable UI Room ${Date.now()}`
+  const login = await request.post('/api/instructor/session', { data: { pin: '2300' } })
+  const instructorToken = (await login.json()).token as string
+  const created = await request.post('/api/rooms', { headers: { authorization: `Bearer ${instructorToken}` }, data: { name: roomName } })
+  const room = await created.json() as { id: string }
+  await page.addInitScript(({ token }) => { sessionStorage.setItem('mbfd-firesim-instructor-token', token) }, { token: instructorToken })
+  await page.goto('/builder')
+  await page.getByRole('button', { name: 'Manage or restore rooms' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: `Close ${roomName}` }).click()
+  await page.getByRole('button', { name: /Closed rooms/ }).click()
+  await page.getByRole('button', { name: `Restore ${roomName}` }).click()
+  await page.getByRole('button', { name: 'Back to setup' }).click()
+  await expect(page.getByLabel('Training room').locator(`option[value="${room.id}"]`)).toContainText(roomName)
 })
 
 test('setup fits short laptop and phone windows without scrolling and keeps every editor reachable', async ({ page }) => {
@@ -93,10 +111,13 @@ test('setup fits short laptop and phone windows without scrolling and keeps ever
   await page.getByRole('button', { name: 'Instructor setup' }).click()
   await page.getByLabel('Instructor PIN').fill('2300')
   await page.getByRole('button', { name: 'Open instructor setup' }).click()
-  await expect(page.getByRole('heading', { name: 'Edit scenario' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Open a training room' })).toBeVisible()
   await expectNoPageScroll(page)
 
-  for (const tab of ['Details', 'Resources', 'Benchmarks', 'Injects', 'Map', 'Room']) {
+  await page.getByRole('button', { name: 'Manage scenarios' }).click()
+  await expect(page.getByRole('heading', { name: 'Edit scenario' })).toBeVisible()
+
+  for (const tab of ['Details', 'Resources', 'Benchmarks', 'Injects', 'Map']) {
     await page.getByRole('tab', { name: tab }).click()
     const panel = page.getByRole('tabpanel', { name: tab })
     await expect(panel).toBeVisible()
@@ -113,7 +134,7 @@ test('setup fits short laptop and phone windows without scrolling and keeps ever
   await expect(page.getByTestId('map-zoom-level')).not.toHaveText(initialZoom ?? '')
 
   await page.setViewportSize({ width: 390, height: 844 })
-  for (const tab of ['Details', 'Resources', 'Benchmarks', 'Injects', 'Map', 'Room']) {
+  for (const tab of ['Details', 'Resources', 'Benchmarks', 'Injects', 'Map']) {
     await page.getByRole('tab', { name: tab }).click()
     const panel = page.getByRole('tabpanel', { name: tab })
     await expect(panel).toBeVisible()
@@ -131,6 +152,7 @@ test('instructor can create, rename, duplicate, and remove scenarios from the ti
   await page.getByRole('button', { name: 'Instructor setup' }).click()
   await page.getByLabel('Instructor PIN').fill('2300')
   await page.getByRole('button', { name: 'Open instructor setup' }).click()
+  await page.getByRole('button', { name: 'Manage scenarios' }).click()
   await page.getByRole('button', { name: 'Create new scenario' }).click()
   await page.getByRole('tab', { name: 'Benchmarks' }).click()
   await expect(page.getByLabel('Benchmark 1 label')).toHaveValue('Command established')
@@ -138,16 +160,20 @@ test('instructor can create, rename, duplicate, and remove scenarios from the ti
   await expect(page.getByLabel('Benchmark 5 label')).toHaveValue('Primary search complete')
   await page.getByRole('tab', { name: 'Details' }).click()
   await page.getByLabel('Scenario title').fill(title)
-  await page.getByRole('button', { name: 'Save' }).click()
+  await page.getByRole('button', { name: 'Save scenario' }).click()
   await expect(page.getByLabel('Scenario library')).toContainText(title)
   await page.getByLabel('Scenario title').fill(renamed)
-  await page.getByRole('button', { name: 'Save' }).click()
+  await page.getByRole('button', { name: 'Save changes' }).click()
   await expect(page.getByLabel('Scenario library')).toContainText(renamed)
   await page.getByRole('button', { name: 'Duplicate' }).click()
   await expect(page.getByLabel('Scenario title')).toHaveValue(`${renamed} Copy`)
   page.once('dialog', (dialog) => dialog.accept())
-  await page.getByRole('button', { name: 'Delete' }).click()
+  await page.getByRole('button', { name: 'Move to closed' }).click()
   await expect(page.getByLabel('Scenario library')).not.toContainText(`${renamed} Copy`)
+  await page.getByRole('button', { name: 'View closed scenarios' }).click()
+  await expect(page.getByText(`${renamed} Copy`, { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: `Restore ${renamed} Copy` }).click()
+  await expect(page.getByLabel('Scenario library')).toContainText(`${renamed} Copy`)
 })
 
 test('instructor timer controls and presentation link work without clipboard permission', async ({ page, request, context }) => {
