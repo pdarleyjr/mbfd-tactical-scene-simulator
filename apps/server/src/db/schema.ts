@@ -1,5 +1,5 @@
-import { customType, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
-import type { ScenarioInput } from '@mbfd/domain'
+import { boolean, customType, index, integer, jsonb, pgTable, real, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import type { BenchmarkDefinition, ScenarioInput } from '@mbfd/domain'
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() { return 'bytea' },
@@ -16,6 +16,7 @@ export const scenarios = pgTable('scenarios', {
   feetPerWorldUnit: real('feet_per_world_unit'),
   apparatusTemplateIds: jsonb('apparatus_template_ids').$type<string[]>().notNull(),
   evolutionIds: jsonb('evolution_ids').$type<string[]>().notNull(),
+  benchmarks: jsonb('benchmarks').$type<BenchmarkDefinition[]>().notNull().default([]),
   injects: jsonb('injects').$type<Array<{ title: string; description: string; revealAtSeconds?: number | undefined }>>().notNull(),
   staticObjects: jsonb('static_objects').$type<ScenarioInput['staticObjects']>().notNull().default([]),
   backgroundAssetId: uuid('background_asset_id'),
@@ -98,9 +99,19 @@ export const evolutionStages = pgTable('evolution_stages', {
   configuration: jsonb('configuration').$type<Record<string, unknown>>().notNull(),
 }, (table) => [uniqueIndex('evolution_stage_unique').on(table.evolutionId, table.ordinal)])
 
+export const trainingRooms = pgTable('training_rooms', {
+  id: uuid('id').primaryKey(),
+  name: text('name').notNull(),
+  accessPinHash: text('access_pin_hash'),
+  archived: boolean('archived').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index('training_rooms_updated_idx').on(table.updatedAt)])
+
 export const trainingSessions = pgTable('training_sessions', {
   id: uuid('id').primaryKey(),
   code: text('code').notNull().unique(),
+  roomId: uuid('room_id').notNull().references(() => trainingRooms.id),
   scenarioId: uuid('scenario_id').notNull().references(() => scenarios.id),
   participatingUnits: jsonb('participating_units').$type<string[]>().notNull(),
   mode300: text('mode_300').notNull(),
@@ -110,7 +121,49 @@ export const trainingSessions = pgTable('training_sessions', {
   presentationMode: text('presentation_mode').notNull().default('operations'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index('training_sessions_scenario_idx').on(table.scenarioId)])
+}, (table) => [index('training_sessions_scenario_idx').on(table.scenarioId), index('training_sessions_room_idx').on(table.roomId, table.createdAt)])
+
+export const sessionUnits = pgTable('session_units', {
+  sessionId: uuid('session_id').notNull().references(() => trainingSessions.id, { onDelete: 'cascade' }),
+  unit: text('unit').notNull(),
+  status: text('status').notNull().default('staged'),
+  arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+  arrivedByClientId: text('arrived_by_client_id'),
+}, (table) => [
+  uniqueIndex('session_unit_unique').on(table.sessionId, table.unit),
+  index('session_units_status_idx').on(table.sessionId, table.status),
+])
+
+export const evolutionRuns = pgTable('evolution_runs', {
+  id: uuid('id').primaryKey(),
+  sessionId: uuid('session_id').notNull().references(() => trainingSessions.id, { onDelete: 'cascade' }),
+  unit: text('unit').notNull(),
+  evolutionId: text('evolution_id').notNull(),
+  label: text('label').notNull(),
+  status: text('status').notNull().default('active'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+  startedElapsedMs: integer('started_elapsed_ms').notNull(),
+  startedByClientId: text('started_by_client_id').notNull(),
+  startedByName: text('started_by_name').notNull(),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  completedElapsedMs: integer('completed_elapsed_ms'),
+  completedByClientId: text('completed_by_client_id'),
+}, (table) => [index('evolution_runs_session_unit_idx').on(table.sessionId, table.unit, table.startedAt)])
+
+export const sessionBenchmarks = pgTable('session_benchmarks', {
+  id: uuid('id').primaryKey(),
+  sessionId: uuid('session_id').notNull().references(() => trainingSessions.id, { onDelete: 'cascade' }),
+  sourceBenchmarkId: text('source_benchmark_id').notNull(),
+  label: text('label').notNull(),
+  description: text('description').notNull().default(''),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  completedElapsedMs: integer('completed_elapsed_ms'),
+  completedByClientId: text('completed_by_client_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('session_benchmark_source_unique').on(table.sessionId, table.sourceBenchmarkId),
+  index('session_benchmarks_completion_idx').on(table.sessionId, table.completedAt),
+])
 
 export const sessionParticipants = pgTable('session_participants', {
   id: uuid('id').primaryKey(),

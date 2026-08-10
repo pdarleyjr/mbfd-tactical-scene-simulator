@@ -14,7 +14,6 @@ export const permissionSchema = z.enum([
 ])
 
 export const unitIdSchema = z.string().trim().min(1).max(24)
-export const roomCodeSchema = z.string().trim().regex(/^[A-HJ-NP-Z2-9]{6}$/)
 export const worldCoordinateSchema = z.number().finite().min(-100_000).max(100_000)
 export const isoTimestampSchema = z.iso.datetime({ offset: true })
 
@@ -155,6 +154,12 @@ export const scenarioInjectInputSchema = z.object({
   revealAtSeconds: z.number().int().nonnegative().optional(),
 })
 
+export const benchmarkDefinitionSchema = z.object({
+  id: z.string().trim().min(1).max(80),
+  label: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(1000).default(''),
+})
+
 export const scenarioInputSchema = z.object({
   title: z.string().trim().min(3).max(160),
   description: z.string().trim().min(1).max(4000),
@@ -164,23 +169,39 @@ export const scenarioInputSchema = z.object({
   feetPerWorldUnit: z.number().positive().optional(),
   apparatusTemplateIds: z.array(z.string().min(1).max(64)).min(1),
   evolutionIds: z.array(z.string().min(1).max(64)).min(1),
+  benchmarks: z.array(benchmarkDefinitionSchema).default([]),
   injects: z.array(scenarioInjectInputSchema).default([]),
   staticObjects: z.array(firegroundObjectSchema).default([]),
 })
 
 export const joinSessionInputSchema = z.object({
-  code: roomCodeSchema,
+  sessionId: z.string().uuid(),
+  roomPin: z.string().trim().regex(/^\d{1,12}$/, 'Room PIN must contain 1 to 12 digits.').optional(),
   name: z.string().trim().min(1).max(80),
   role: z.enum(['crew', 'command300']),
   unit: unitIdSchema,
   clientId: z.string().min(1).max(128).optional(),
 })
 
+export const createRoomInputSchema = z.object({
+  name: z.string().trim().min(3).max(100),
+  accessPin: z.string().trim().regex(/^\d{1,12}$/, 'Room PIN must contain 1 to 12 digits.').optional(),
+})
+
+export const updateRoomInputSchema = createRoomInputSchema.partial().extend({
+  accessPin: z.string().trim().regex(/^\d{1,12}$/, 'Room PIN must contain 1 to 12 digits.').nullable().optional(),
+  archived: z.boolean().optional(),
+})
+
 export const createSessionInputSchema = z.object({
+  roomId: z.string().uuid(),
   scenarioId: z.string().uuid().or(z.string().min(1).max(128)),
   participatingUnits: z.array(unitIdSchema).min(1),
   mode300: z.enum(['independent', 'live']),
+  benchmarkIds: z.array(z.string().min(1).max(80)).default([]),
 })
+
+export const configureSessionInputSchema = createSessionInputSchema.omit({ roomId: true })
 
 export const tokenClaimsSchema = z.object({
   sessionId: z.string().min(1).max(128),
@@ -215,8 +236,11 @@ export type Workspace = z.infer<typeof workspaceSchema>
 export type Permission = z.infer<typeof permissionSchema>
 export type ConnectionPoint = z.infer<typeof connectionPointSchema>
 export type FiregroundObject = z.infer<typeof firegroundObjectSchema>
+export type BenchmarkDefinition = z.infer<typeof benchmarkDefinitionSchema>
 export type ScenarioInput = z.infer<typeof scenarioInputSchema>
 export type JoinSessionInput = z.infer<typeof joinSessionInputSchema>
+export type CreateRoomInput = z.infer<typeof createRoomInputSchema>
+export type UpdateRoomInput = z.infer<typeof updateRoomInputSchema>
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>
 export type TokenClaims = z.infer<typeof tokenClaimsSchema>
 export type DomainEvent = z.infer<typeof domainEventSchema>

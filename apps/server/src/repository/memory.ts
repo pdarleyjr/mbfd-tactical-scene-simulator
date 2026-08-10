@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ScenarioInput } from '@mbfd/domain'
-import type { ParticipantRecord, ScenarioAssetRecord, ScenarioRecord, SessionRecord, StoredDomainEvent } from '../model.js'
+import type { EvolutionRunRecord, ParticipantRecord, RoomRecord, ScenarioAssetRecord, ScenarioRecord, SessionBenchmarkRecord, SessionRecord, StoredDomainEvent, UnitStatusRecord } from '../model.js'
 import { initialScenario } from '../seed.js'
 import type { TacticalRepository } from './repository.js'
 
@@ -17,6 +17,10 @@ function slugify(value: string): string {
 export class MemoryRepository implements TacticalRepository {
   private readonly scenarios = new Map<string, ScenarioRecord>([[initialScenario.id, structuredClone(initialScenario)]])
   private readonly sessions = new Map<string, SessionRecord>()
+  private readonly rooms = new Map<string, RoomRecord>()
+  private readonly unitStatuses = new Map<string, UnitStatusRecord>()
+  private readonly benchmarks = new Map<string, SessionBenchmarkRecord>()
+  private readonly evolutionRuns = new Map<string, EvolutionRunRecord>()
   private readonly participants: ParticipantRecord[] = []
   private readonly events: StoredDomainEvent[] = []
   private readonly documents = new Map<string, Uint8Array>()
@@ -69,6 +73,32 @@ export class MemoryRepository implements TacticalRepository {
     scenario.updatedAt = new Date().toISOString()
   }
 
+  async createRoom(input: { name: string; accessPinHash?: string }): Promise<RoomRecord> {
+    const now = new Date().toISOString()
+    const room: RoomRecord = { id: randomUUID(), name: input.name, ...(input.accessPinHash ? { accessPinHash: input.accessPinHash } : {}), archived: false, createdAt: now, updatedAt: now }
+    this.rooms.set(room.id, room)
+    return structuredClone(room)
+  }
+
+  async listRooms(): Promise<RoomRecord[]> {
+    return [...this.rooms.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((room) => structuredClone(room))
+  }
+
+  async getRoom(id: string): Promise<RoomRecord | undefined> {
+    const room = this.rooms.get(id)
+    return room ? structuredClone(room) : undefined
+  }
+
+  async updateRoom(id: string, update: Partial<Pick<RoomRecord, 'name' | 'accessPinHash' | 'archived'>> & { clearAccessPin?: boolean }): Promise<RoomRecord | undefined> {
+    const current = this.rooms.get(id)
+    if (!current) return undefined
+    const updated: RoomRecord = { ...current, ...update, id, updatedAt: new Date().toISOString() }
+    delete (updated as RoomRecord & { clearAccessPin?: boolean }).clearAccessPin
+    if (update.clearAccessPin) delete updated.accessPinHash
+    this.rooms.set(id, updated)
+    return structuredClone(updated)
+  }
+
   async createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<SessionRecord> {
     let code = createRoomCode()
     while ([...this.sessions.values()].some((session) => session.code === code)) code = createRoomCode()
@@ -79,7 +109,8 @@ export class MemoryRepository implements TacticalRepository {
   }
 
   async listSessions(): Promise<SessionRecord[]> {
-    return Promise.all([...this.sessions.values()].map((session) => this.getSession(session.id))).then((items) => items.filter((item): item is SessionRecord => Boolean(item)))
+    const items = await Promise.all([...this.sessions.values()].reverse().map((session) => this.getSession(session.id)))
+    return items.filter((item): item is SessionRecord => Boolean(item)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
   async getSession(id: string): Promise<SessionRecord | undefined> {
@@ -103,6 +134,87 @@ export class MemoryRepository implements TacticalRepository {
     this.sessions.set(id, updated)
     const cloned = structuredClone(updated)
     return updated.frozen300Plan ? { ...cloned, frozen300Plan: new Uint8Array(updated.frozen300Plan) } : cloned
+  }
+
+  async replaceSessionUnits(sessionId: string, units: string[]): Promise<UnitStatusRecord[]> {
+    for (const key of [...this.unitStatuses.keys()]) if (key.startsWith(`${sessionId}:`)) this.unitStatuses.delete(key)
+    const records = units.map((unit) => ({ sessionId, unit, status: 'staged' as const }))
+    for (const record of records) this.unitStatuses.set(`${sessionId}:${record.unit}`, record)
+    return structuredClone(records)
+  }
+
+  async listUnitStatuses(sessionId: string): Promise<UnitStatusRecord[]> {
+    return [...this.unitStatuses.values()].filter((item) => item.sessionId === sessionId).map((item) => structuredClone(item))
+  }
+
+  async getUnitStatus(sessionId: string, unit: string): Promise<UnitStatusRecord | undefined> {
+    const record = this.unitStatuses.get(`${sessionId}:${unit}`)
+    return record ? structuredClone(record) : undefined
+  }
+
+  async updateUnitStatus(sessionId: string, unit: string, update: Partial<UnitStatusRecord> & { clearArrival?: boolean }): Promise<UnitStatusRecord | undefined> {
+    const key = `${sessionId}:${unit}`
+    const current = this.unitStatuses.get(key)
+    if (!current) return undefined
+    const updated: UnitStatusRecord = { ...current, ...update, sessionId, unit }
+    delete (updated as UnitStatusRecord & { clearArrival?: boolean }).clearArrival
+    if (update.clearArrival) { delete updated.arrivedAt; delete updated.arrivedByClientId }
+    this.unitStatuses.set(key, updated)
+    return structuredClone(updated)
+  }
+
+  async replaceSessionBenchmarks(sessionId: string, items: Array<{ sourceBenchmarkId: string; label: string; description: string }>): Promise<SessionBenchmarkRecord[]> {
+    for (const [key, item] of this.benchmarks) if (item.sessionId === sessionId) this.benchmarks.delete(key)
+    const createdAt = new Date().toISOString()
+    const records = items.map((item) => ({ id: randomUUID(), sessionId, ...item, createdAt }))
+    for (const record of records) this.benchmarks.set(record.id, record)
+    return structuredClone(records)
+  }
+
+  async listSessionBenchmarks(sessionId: string): Promise<SessionBenchmarkRecord[]> {
+    return [...this.benchmarks.values()].filter((item) => item.sessionId === sessionId).map((item) => structuredClone(item))
+  }
+
+  async getSessionBenchmark(id: string): Promise<SessionBenchmarkRecord | undefined> {
+    const record = this.benchmarks.get(id)
+    return record ? structuredClone(record) : undefined
+  }
+
+  async updateSessionBenchmark(id: string, update: Partial<SessionBenchmarkRecord> & { clearCompletion?: boolean }): Promise<SessionBenchmarkRecord | undefined> {
+    const current = this.benchmarks.get(id)
+    if (!current) return undefined
+    const updated: SessionBenchmarkRecord = { ...current, ...update, id }
+    delete (updated as SessionBenchmarkRecord & { clearCompletion?: boolean }).clearCompletion
+    if (update.clearCompletion) {
+      delete updated.completedAt
+      delete updated.completedElapsedMs
+      delete updated.completedByClientId
+    }
+    this.benchmarks.set(id, updated)
+    return structuredClone(updated)
+  }
+
+  async createEvolutionRun(input: Omit<EvolutionRunRecord, 'id'>): Promise<EvolutionRunRecord> {
+    const run = { id: randomUUID(), ...input }
+    this.evolutionRuns.set(run.id, run)
+    return structuredClone(run)
+  }
+
+  async getEvolutionRun(id: string): Promise<EvolutionRunRecord | undefined> {
+    const run = this.evolutionRuns.get(id)
+    return run ? structuredClone(run) : undefined
+  }
+
+  async listEvolutionRuns(sessionId: string): Promise<EvolutionRunRecord[]> {
+    return [...this.evolutionRuns.values()].filter((run) => run.sessionId === sessionId).sort((a, b) => a.startedAt.localeCompare(b.startedAt)).map((run) => structuredClone(run))
+  }
+
+  async updateEvolutionRun(id: string, update: Partial<EvolutionRunRecord>): Promise<EvolutionRunRecord | undefined> {
+    const current = this.evolutionRuns.get(id)
+    if (!current) return undefined
+    const updated = { ...current, ...update, id }
+    this.evolutionRuns.set(id, updated)
+    return structuredClone(updated)
   }
 
   async addParticipant(participant: ParticipantRecord): Promise<void> {

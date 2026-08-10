@@ -15,10 +15,24 @@ function getOrCreateClientId(): string {
 
 function readParticipant(): Partial<AuthState> {
   try {
-    return JSON.parse(sessionStorage.getItem(participantKey) ?? '{}') as Partial<AuthState>
+    const stored = JSON.parse(sessionStorage.getItem(participantKey) ?? '{}') as Partial<AuthState>
+    if (stored.token && tokenExpired(stored.token)) {
+      sessionStorage.removeItem(participantKey)
+      return {}
+    }
+    return stored
   } catch {
     return {}
   }
+}
+
+function tokenExpired(token: string): boolean {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return true
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '='))) as { exp?: number }
+    return typeof decoded.exp !== 'number' || decoded.exp * 1000 <= Date.now()
+  } catch { return true }
 }
 
 interface AuthState {
@@ -34,6 +48,7 @@ interface AuthState {
   setParticipant: (input: { token: string; claims: TokenClaims }) => void
   setInstructorToken: (token: string) => void
   clearParticipant: () => void
+  clearInstructor: () => void
 }
 
 const cached = typeof window === 'undefined' ? {} : readParticipant()
@@ -47,7 +62,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   role: cached.role,
   mode300: cached.mode300,
   permissions: cached.permissions,
-  instructorToken: typeof window === 'undefined' ? undefined : sessionStorage.getItem(instructorTokenKey) ?? undefined,
+  instructorToken: typeof window === 'undefined' ? undefined : (() => { const value = sessionStorage.getItem(instructorTokenKey); if (value && !tokenExpired(value)) return value; sessionStorage.removeItem(instructorTokenKey); return undefined })(),
   setParticipant: ({ token, claims }) => {
     const next = { token, sessionId: claims.sessionId, name: claims.name, unit: claims.unit, role: claims.role, mode300: claims.mode300, permissions: claims.permissions }
     sessionStorage.setItem(participantKey, JSON.stringify(next))
@@ -60,6 +75,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   clearParticipant: () => {
     sessionStorage.removeItem(participantKey)
     set({ token: undefined, sessionId: undefined, name: undefined, unit: undefined, role: undefined, mode300: undefined, permissions: undefined })
+  },
+  clearInstructor: () => {
+    sessionStorage.removeItem(instructorTokenKey)
+    set({ instructorToken: undefined })
   },
 }))
 

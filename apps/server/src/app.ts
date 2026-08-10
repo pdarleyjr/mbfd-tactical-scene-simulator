@@ -6,10 +6,14 @@ import fastifyRateLimit from '@fastify/rate-limit'
 import fastifyStatic from '@fastify/static'
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify'
 import {
+  configureSessionInputSchema,
+  createRoomInputSchema,
   createSessionInputSchema,
   domainEventSchema,
+  evolutionCatalog,
   joinSessionInputSchema,
   scenarioInputSchema,
+  updateRoomInputSchema,
   type ParticipantRole,
 } from '@mbfd/domain'
 import { defaultPermissions, documentName } from '@mbfd/collaboration'
@@ -22,6 +26,7 @@ import {
   verifyControllerToken,
   verifySessionToken,
 } from './security/tokens.js'
+import { hashRoomPin, roomPinMatches } from './security/room-pins.js'
 
 export interface AppOptions {
   repository: TacticalRepository
@@ -49,6 +54,15 @@ function scenarioResponse<T extends { assets: Array<{ runtimePath: string; thumb
       ...(asset.posterPath ? { posterUrl: `/scenario-assets/${asset.posterPath}` } : {}),
     })),
   }
+}
+
+function elapsedMs(session: { startedAt?: string; createdAt: string }): number {
+  return Math.max(0, Date.now() - new Date(session.startedAt ?? session.createdAt).getTime())
+}
+
+function sessionResponse<T extends { code: string }>(session: T): Omit<T, 'code'> {
+  const { code: _legacyCode, ...response } = session
+  return response
 }
 
 export async function createApp(options: AppOptions): Promise<FastifyInstance> {
@@ -139,6 +153,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       ...(source.feetPerWorldUnit ? { feetPerWorldUnit: source.feetPerWorldUnit } : {}),
       apparatusTemplateIds: [...source.apparatusTemplateIds],
       evolutionIds: [...source.evolutionIds],
+      benchmarks: structuredClone(source.benchmarks),
       injects: structuredClone(source.injects),
       staticObjects: structuredClone(source.staticObjects),
     })
@@ -168,25 +183,94 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     return reply.code(201).send({ ...asset, runtimeUrl: `/scenario-assets/${asset.runtimePath}`, posterUrl: `/scenario-assets/${asset.posterPath}` })
   })
 
+  async function publicRoomResponse(room: Awaited<ReturnType<TacticalRepository['getRoom']>>) {
+    if (!room) return undefined
+    const sessions = (await options.repository.listSessions()).filter((session) => session.roomId === room.id && session.status !== 'complete')
+    const currentSession = sessions[0]
+    const scenario = currentSession ? await options.repository.getScenario(currentSession.scenarioId) : undefined
+    return {
+      id: room.id,
+      name: room.name,
+      locked: Boolean(room.accessPinHash),
+      updatedAt: room.updatedAt,
+      ...(currentSession ? { currentSession: { id: currentSession.id, status: currentSession.status, participatingUnits: currentSession.participatingUnits, scenarioTitle: scenario?.title ?? 'Training scenario' } } : {}),
+    }
+  }
+
+  app.get('/api/rooms', async () => {
+    const rooms = (await options.repository.listRooms()).filter((room) => !room.archived)
+    return { items: (await Promise.all(rooms.map(publicRoomResponse))).filter(Boolean) }
+  })
+
+  app.get<{ Params: { id: string } }>('/api/rooms/:id', async (request, reply) => {
+    const room = await options.repository.getRoom(request.params.id)
+    if (!room || room.archived) return reply.code(404).send({ error: 'Training room not found.' })
+    return publicRoomResponse(room)
+  })
+
+  app.post('/api/rooms', async (request, reply) => {
+    verifyControllerToken(bearerToken(request), options.signingSecret)
+    const input = createRoomInputSchema.parse(request.body)
+    const room = await options.repository.createRoom({ name: input.name, ...(input.accessPin ? { accessPinHash: hashRoomPin(input.accessPin) } : {}) })
+    return reply.code(201).send({ id: room.id, name: room.name, locked: Boolean(room.accessPinHash), updatedAt: room.updatedAt })
+  })
+
+  app.patch<{ Params: { id: string } }>('/api/rooms/:id', async (request, reply) => {
+    verifyControllerToken(bearerToken(request), options.signingSecret)
+    const input = updateRoomInputSchema.parse(request.body)
+    const room = await options.repository.updateRoom(request.params.id, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(typeof input.accessPin === 'string' ? { accessPinHash: hashRoomPin(input.accessPin) } : {}),
+      ...(input.accessPin === null ? { clearAccessPin: true } : {}),
+      ...(input.archived !== undefined ? { archived: input.archived } : {}),
+    })
+    if (!room) return reply.code(404).send({ error: 'Training room not found.' })
+    return { id: room.id, name: room.name, locked: Boolean(room.accessPinHash), updatedAt: room.updatedAt }
+  })
+
   app.post('/api/sessions', async (request, reply) => {
     verifyControllerToken(bearerToken(request), options.signingSecret)
     const input = createSessionInputSchema.parse(request.body)
-    if (!(await options.repository.getScenario(input.scenarioId))) return reply.code(404).send({ error: 'Scenario not found.' })
+    const room = await options.repository.getRoom(input.roomId)
+    if (!room || room.archived) return reply.code(404).send({ error: 'Training room not found.' })
+    const scenario = await options.repository.getScenario(input.scenarioId)
+    if (!scenario) return reply.code(404).send({ error: 'Scenario not found.' })
     const session = await options.repository.createSession({
-      ...input,
+      roomId: input.roomId,
+      scenarioId: input.scenarioId,
+      participatingUnits: input.participatingUnits,
+      mode300: input.mode300,
       status: 'setup',
       presentationMode: 'operations',
     })
-    return reply.code(201).send(session)
+    await options.repository.replaceSessionUnits(session.id, input.participatingUnits)
+    const selected = scenario.benchmarks.filter((benchmark) => input.benchmarkIds.includes(benchmark.id))
+    const benchmarks = await options.repository.replaceSessionBenchmarks(session.id, selected.map((benchmark) => ({ sourceBenchmarkId: benchmark.id, label: benchmark.label, description: benchmark.description })))
+    return reply.code(201).send({ ...sessionResponse(session), benchmarks })
+  })
+
+  app.put<{ Params: { id: string } }>('/api/sessions/:id/configuration', async (request, reply) => {
+    verifyControllerToken(bearerToken(request), options.signingSecret)
+    const input = configureSessionInputSchema.parse(request.body)
+    const session = await options.repository.getSession(request.params.id)
+    if (!session) return reply.code(404).send({ error: 'Session not found.' })
+    if (session.status !== 'setup') return reply.code(409).send({ error: 'Only a room in setup can be reconfigured.' })
+    const scenario = await options.repository.getScenario(input.scenarioId)
+    if (!scenario) return reply.code(404).send({ error: 'Scenario not found.' })
+    const updated = await options.repository.updateSession(session.id, { scenarioId: input.scenarioId, participatingUnits: input.participatingUnits, mode300: input.mode300 })
+    await options.repository.replaceSessionUnits(session.id, input.participatingUnits)
+    const selected = scenario.benchmarks.filter((benchmark) => input.benchmarkIds.includes(benchmark.id))
+    const benchmarks = await options.repository.replaceSessionBenchmarks(session.id, selected.map((benchmark) => ({ sourceBenchmarkId: benchmark.id, label: benchmark.label, description: benchmark.description })))
+    return { ...(updated ? sessionResponse(updated) : {}), benchmarks }
   })
 
   app.get('/api/sessions', async (request) => {
     verifyControllerToken(bearerToken(request), options.signingSecret)
-    return { items: await options.repository.listSessions() }
+    return { items: (await options.repository.listSessions()).map(sessionResponse) }
   })
 
   app.patch<{ Params: { id: string } }>('/api/sessions/:id', async (request, reply) => {
-    verifyControllerToken(bearerToken(request), options.signingSecret)
+    const controller = verifyControllerToken(bearerToken(request), options.signingSecret)
     const body = request.body as { status?: unknown; presentationMode?: unknown }
     const status = typeof body.status === 'string' && ['setup', 'running', 'frozen', 'complete'].includes(body.status) ? body.status as 'setup' | 'running' | 'frozen' | 'complete' : undefined
     const presentationMode = typeof body.presentationMode === 'string' && ['operations', '300-plan', 'split', 'overlay'].includes(body.presentationMode) ? body.presentationMode as 'operations' | '300-plan' | 'split' | 'overlay' : undefined
@@ -198,22 +282,22 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       ...(status === 'running' && !existing.startedAt ? { startedAt: new Date().toISOString() } : {}),
       ...(presentationMode ? { presentationMode } : {}),
     })
-    return updated
-  })
-
-  app.get<{ Params: { code: string } }>('/api/sessions/code/:code', async (request, reply) => {
-    const session = await options.repository.getSessionByCode(request.params.code)
-    if (!session) return reply.code(404).send({ error: 'Session code not found.' })
-    const scenario = await options.repository.getScenario(session.scenarioId)
-    return { session: { id: session.id, code: session.code, mode300: session.mode300, status: session.status, participatingUnits: session.participatingUnits }, scenario: scenario ? scenarioResponse(scenario) : undefined }
+    if (status && status !== existing.status) {
+      const now = new Date().toISOString()
+      await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: existing.id, workspace: 'operations', elapsedMs: elapsedMs(updated ?? existing), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: `session-${status}`, metadata: {} }))
+    }
+    return updated ? sessionResponse(updated) : updated
   })
 
   app.post('/api/sessions/join', {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
   }, async (request, reply) => {
     const input = joinSessionInputSchema.parse(request.body)
-    const session = await options.repository.getSessionByCode(input.code)
-    if (!session) return reply.code(404).send({ error: 'Session code not found.' })
+    const session = await options.repository.getSession(input.sessionId)
+    if (!session) return reply.code(404).send({ error: 'Training session not found.' })
+    const room = await options.repository.getRoom(session.roomId)
+    if (!room || room.archived) return reply.code(404).send({ error: 'Training room not found.' })
+    if (room.accessPinHash && (!input.roomPin || !roomPinMatches(input.roomPin, room.accessPinHash))) return reply.code(403).send({ error: 'Room PIN was not accepted.' })
     if (!session.participatingUnits.includes(input.unit)) return reply.code(403).send({ error: 'That unit is not enabled for this session.' })
     if (input.role === 'command300' && input.unit !== '300') return reply.code(400).send({ error: 'The 300 role must use unit 300.' })
     const clientId = input.clientId ?? randomUUID()
@@ -228,7 +312,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       mode300: session.mode300,
       permissions: defaultPermissions(input.role),
     }, options.signingSecret)
-    return { token, session, clientId }
+    return { token, session: sessionResponse(session), room: { id: room.id, name: room.name, locked: Boolean(room.accessPinHash) }, clientId }
   })
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id/bootstrap', async (request, reply) => {
@@ -245,7 +329,13 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     if (!session) return reply.code(404).send({ error: 'Session not found.' })
     const scenario = await options.repository.getScenario(session.scenarioId)
     const participants = await options.repository.listParticipants(session.id)
-    return { session, scenario: scenario ? scenarioResponse(scenario) : undefined, participants, role }
+    const room = await options.repository.getRoom(session.roomId)
+    const [units, evolutions, benchmarks] = await Promise.all([
+      options.repository.listUnitStatuses(session.id),
+      options.repository.listEvolutionRuns(session.id),
+      options.repository.listSessionBenchmarks(session.id),
+    ])
+    return { session: sessionResponse(session), room: room ? { id: room.id, name: room.name, locked: Boolean(room.accessPinHash) } : undefined, scenario: scenario ? scenarioResponse(scenario) : undefined, participants, units, evolutions, benchmarks, role }
   })
 
   app.post<{ Params: { id: string } }>('/api/sessions/:id/presentation-token', async (request, reply) => {
@@ -266,7 +356,91 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       mode300: 'hybrid',
       ...(currentPlan ? { frozen300Plan: currentPlan } : {}),
     })
-    return { session: updated, planPreserved: Boolean(currentPlan) }
+    return { session: updated ? sessionResponse(updated) : updated, planPreserved: Boolean(currentPlan) }
+  })
+
+  app.patch<{ Params: { id: string; unit: string } }>('/api/sessions/:id/units/:unit', async (request, reply) => {
+    const controller = verifyControllerToken(bearerToken(request), options.signingSecret)
+    const body = request.body as { status?: unknown }
+    if (body.status !== 'staged' && body.status !== 'arrived') return reply.code(400).send({ error: 'Unit status must be staged or arrived.' })
+    const session = await options.repository.getSession(request.params.id)
+    if (!session) return reply.code(404).send({ error: 'Session not found.' })
+    const current = await options.repository.getUnitStatus(session.id, request.params.unit)
+    if (!current) return reply.code(404).send({ error: 'Unit is not assigned to this session.' })
+    const now = new Date().toISOString()
+    const updated = await options.repository.updateUnitStatus(session.id, current.unit, body.status === 'arrived'
+      ? { status: 'arrived', arrivedAt: now, arrivedByClientId: controller.clientId }
+      : { status: 'staged', clearArrival: true })
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: elapsedMs(session), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.status === 'arrived' ? 'unit-arrived' : 'unit-staged', metadata: { unit: current.unit } }))
+    return updated
+  })
+
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/evolutions', async (request, reply) => {
+    const claims = verifySessionToken(bearerToken(request), options.signingSecret)
+    if (claims.sessionId !== request.params.id) return reply.code(403).send({ error: 'Session token does not match this session.' })
+    const session = await options.repository.getSession(request.params.id)
+    if (!session) return reply.code(404).send({ error: 'Session not found.' })
+    if (session.status !== 'running') return reply.code(409).send({ error: 'The instructor has not started this scenario.' })
+    const unit = await options.repository.getUnitStatus(session.id, claims.unit)
+    if (!unit || unit.status !== 'arrived') return reply.code(409).send({ error: 'Scenario will load once the instructor marks your unit arrived.' })
+    const body = request.body as { evolutionId?: unknown }
+    const evolution = evolutionCatalog.find((item) => item.id === body.evolutionId)
+    const scenario = await options.repository.getScenario(session.scenarioId)
+    if (!evolution || !scenario?.evolutionIds.includes(evolution.id)) return reply.code(400).send({ error: 'That evolution is not enabled for this scenario.' })
+    const active = (await options.repository.listEvolutionRuns(session.id)).find((run) => run.unit === claims.unit && run.status === 'active')
+    if (active) return reply.code(409).send({ error: `${claims.unit} already has an active evolution.` })
+    const now = new Date().toISOString()
+    const run = await options.repository.createEvolutionRun({ sessionId: session.id, unit: claims.unit, evolutionId: evolution.id, label: evolution.label, status: 'active', startedAt: now, startedElapsedMs: elapsedMs(session), startedByClientId: claims.clientId, startedByName: claims.name })
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: run.startedElapsedMs, occurredAt: now, actorClientId: claims.clientId, actorName: claims.name, actorUnit: claims.unit, eventType: 'evolution-started', objectId: run.id, metadata: { evolutionId: run.evolutionId, label: run.label } }))
+    return reply.code(201).send(run)
+  })
+
+  app.patch<{ Params: { id: string; runId: string } }>('/api/sessions/:id/evolutions/:runId', async (request, reply) => {
+    const claims = verifySessionToken(bearerToken(request), options.signingSecret)
+    if (claims.sessionId !== request.params.id) return reply.code(403).send({ error: 'Session token does not match this session.' })
+    const body = request.body as { status?: unknown }
+    if (body.status !== 'complete') return reply.code(400).send({ error: 'Evolution status must be complete.' })
+    const [session, run] = await Promise.all([options.repository.getSession(request.params.id), options.repository.getEvolutionRun(request.params.runId)])
+    if (!session || !run || run.sessionId !== session.id) return reply.code(404).send({ error: 'Evolution run not found.' })
+    if (run.unit !== claims.unit) return reply.code(403).send({ error: 'Only the assigned unit can complete this evolution.' })
+    if (run.status === 'complete') return run
+    const now = new Date().toISOString()
+    const completed = await options.repository.updateEvolutionRun(run.id, { status: 'complete', completedAt: now, completedElapsedMs: elapsedMs(session), completedByClientId: claims.clientId })
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: completed?.completedElapsedMs ?? elapsedMs(session), occurredAt: now, actorClientId: claims.clientId, actorName: claims.name, actorUnit: claims.unit, eventType: 'evolution-completed', objectId: run.id, metadata: { evolutionId: run.evolutionId, label: run.label } }))
+    return completed
+  })
+
+  app.patch<{ Params: { id: string; benchmarkId: string } }>('/api/sessions/:id/benchmarks/:benchmarkId', async (request, reply) => {
+    const controller = verifyControllerToken(bearerToken(request), options.signingSecret)
+    const body = request.body as { completed?: unknown }
+    if (typeof body.completed !== 'boolean') return reply.code(400).send({ error: 'Completed must be true or false.' })
+    const [session, benchmark] = await Promise.all([options.repository.getSession(request.params.id), options.repository.getSessionBenchmark(request.params.benchmarkId)])
+    if (!session || !benchmark || benchmark.sessionId !== session.id) return reply.code(404).send({ error: 'Benchmark not found.' })
+    const now = new Date().toISOString()
+    const updated = await options.repository.updateSessionBenchmark(benchmark.id, body.completed
+      ? { completedAt: now, completedElapsedMs: elapsedMs(session), completedByClientId: controller.clientId }
+      : { clearCompletion: true })
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: elapsedMs(session), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.completed ? 'benchmark-completed' : 'benchmark-reopened', objectId: benchmark.id, metadata: { label: benchmark.label } }))
+    return updated
+  })
+
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/activity', async (request, reply) => {
+    const token = bearerToken(request)
+    try {
+      const claims = verifySessionToken(token, options.signingSecret)
+      if (claims.sessionId !== request.params.id) return reply.code(403).send({ error: 'Session token does not match this session.' })
+    } catch {
+      verifyControllerToken(token, options.signingSecret)
+    }
+    const session = await options.repository.getSession(request.params.id)
+    if (!session) return reply.code(404).send({ error: 'Session not found.' })
+    const [units, evolutions, benchmarks, events] = await Promise.all([
+      options.repository.listUnitStatuses(session.id),
+      options.repository.listEvolutionRuns(session.id),
+      options.repository.listSessionBenchmarks(session.id),
+      options.repository.listEvents(session.id),
+    ])
+    return { session: { id: session.id, status: session.status, startedAt: session.startedAt }, units, evolutions, benchmarks, events }
   })
 
   app.post<{ Params: { id: string } }>('/api/sessions/:id/events', async (request, reply) => {

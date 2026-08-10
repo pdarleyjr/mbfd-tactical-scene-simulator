@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 import { apparatusCatalog, evolutionCatalog, type Mode300, type ScenarioInput } from '@mbfd/domain'
 import { initialScenario } from '../seed.js'
-import type { ParticipantRecord, ScenarioAssetRecord, ScenarioRecord, SessionRecord, StoredDomainEvent } from '../model.js'
+import type { EvolutionRunRecord, ParticipantRecord, RoomRecord, ScenarioAssetRecord, ScenarioRecord, SessionBenchmarkRecord, SessionRecord, StoredDomainEvent, UnitStatusRecord } from '../model.js'
 import * as schema from '../db/schema.js'
 import type { TacticalRepository } from './repository.js'
 
@@ -57,6 +57,7 @@ export class PostgresRepository implements TacticalRepository {
         worldHeight: initialScenario.worldHeight,
         apparatusTemplateIds: initialScenario.apparatusTemplateIds,
         evolutionIds: initialScenario.evolutionIds,
+        benchmarks: initialScenario.benchmarks,
         injects: initialScenario.injects,
         staticObjects: initialScenario.staticObjects,
         backgroundAssetId: initialScenario.backgroundAssetId,
@@ -101,6 +102,7 @@ export class PostgresRepository implements TacticalRepository {
       ...(row.feetPerWorldUnit === null ? {} : { feetPerWorldUnit: row.feetPerWorldUnit }),
       apparatusTemplateIds: row.apparatusTemplateIds,
       evolutionIds: row.evolutionIds,
+      benchmarks: row.benchmarks,
       injects: row.injects,
       staticObjects: row.staticObjects,
       ...(row.backgroundAssetId ? { backgroundAssetId: row.backgroundAssetId } : {}),
@@ -135,6 +137,7 @@ export class PostgresRepository implements TacticalRepository {
       ...(input.feetPerWorldUnit ? { feetPerWorldUnit: input.feetPerWorldUnit } : {}),
       apparatusTemplateIds: input.apparatusTemplateIds,
       evolutionIds: input.evolutionIds,
+      benchmarks: input.benchmarks,
       injects: input.injects,
       staticObjects: input.staticObjects,
       createdAt: now,
@@ -164,10 +167,44 @@ export class PostgresRepository implements TacticalRepository {
     await this.db.update(schema.scenarios).set({ ...update, updatedAt: new Date() }).where(eq(schema.scenarios.id, asset.scenarioId))
   }
 
+  private roomFromRow(row: typeof schema.trainingRooms.$inferSelect): RoomRecord {
+    return { id: row.id, name: row.name, ...(row.accessPinHash ? { accessPinHash: row.accessPinHash } : {}), archived: row.archived, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() }
+  }
+
+  async createRoom(input: { name: string; accessPinHash?: string }): Promise<RoomRecord> {
+    const id = randomUUID()
+    await this.db.insert(schema.trainingRooms).values({ id, name: input.name, ...(input.accessPinHash ? { accessPinHash: input.accessPinHash } : {}) })
+    const created = await this.getRoom(id)
+    if (!created) throw new Error('Room insert failed')
+    return created
+  }
+
+  async listRooms(): Promise<RoomRecord[]> {
+    const rows = await this.db.select().from(schema.trainingRooms).orderBy(desc(schema.trainingRooms.updatedAt))
+    return rows.map((row) => this.roomFromRow(row))
+  }
+
+  async getRoom(id: string): Promise<RoomRecord | undefined> {
+    const [row] = await this.db.select().from(schema.trainingRooms).where(eq(schema.trainingRooms.id, id)).limit(1)
+    return row ? this.roomFromRow(row) : undefined
+  }
+
+  async updateRoom(id: string, update: Partial<Pick<RoomRecord, 'name' | 'accessPinHash' | 'archived'>> & { clearAccessPin?: boolean }): Promise<RoomRecord | undefined> {
+    await this.db.update(schema.trainingRooms).set({
+      ...(update.name !== undefined ? { name: update.name } : {}),
+      ...(update.accessPinHash !== undefined ? { accessPinHash: update.accessPinHash } : {}),
+      ...(update.clearAccessPin ? { accessPinHash: null } : {}),
+      ...(update.archived !== undefined ? { archived: update.archived } : {}),
+      updatedAt: new Date(),
+    }).where(eq(schema.trainingRooms.id, id))
+    return this.getRoom(id)
+  }
+
   private sessionFromRow(row: typeof schema.trainingSessions.$inferSelect): SessionRecord {
     return {
       id: row.id,
       code: row.code,
+      roomId: row.roomId,
       scenarioId: row.scenarioId,
       participatingUnits: row.participatingUnits,
       mode300: row.mode300 as Mode300,
@@ -185,7 +222,7 @@ export class PostgresRepository implements TacticalRepository {
     while (await this.getSessionByCode(code)) code = createRoomCode()
     const id = randomUUID()
     await this.db.insert(schema.trainingSessions).values({
-      id, code, scenarioId: input.scenarioId, participatingUnits: input.participatingUnits,
+      id, code, roomId: input.roomId, scenarioId: input.scenarioId, participatingUnits: input.participatingUnits,
       mode300: input.mode300, status: input.status, presentationMode: input.presentationMode,
       ...(input.startedAt ? { startedAt: new Date(input.startedAt) } : {}),
       ...(input.frozen300Plan ? { frozen300Plan: Buffer.from(input.frozen300Plan) } : {}),
@@ -212,6 +249,7 @@ export class PostgresRepository implements TacticalRepository {
 
   async updateSession(id: string, update: Partial<SessionRecord>): Promise<SessionRecord | undefined> {
     await this.db.update(schema.trainingSessions).set({
+      ...(update.roomId ? { roomId: update.roomId } : {}),
       ...(update.scenarioId ? { scenarioId: update.scenarioId } : {}),
       ...(update.participatingUnits ? { participatingUnits: update.participatingUnits } : {}),
       ...(update.mode300 ? { mode300: update.mode300 } : {}),
@@ -222,6 +260,102 @@ export class PostgresRepository implements TacticalRepository {
       updatedAt: new Date(),
     }).where(eq(schema.trainingSessions.id, id))
     return this.getSession(id)
+  }
+
+  private unitFromRow(row: typeof schema.sessionUnits.$inferSelect): UnitStatusRecord {
+    return { sessionId: row.sessionId, unit: row.unit, status: row.status as UnitStatusRecord['status'], ...(row.arrivedAt ? { arrivedAt: row.arrivedAt.toISOString() } : {}), ...(row.arrivedByClientId ? { arrivedByClientId: row.arrivedByClientId } : {}) }
+  }
+
+  async replaceSessionUnits(sessionId: string, units: string[]): Promise<UnitStatusRecord[]> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(schema.sessionUnits).where(eq(schema.sessionUnits.sessionId, sessionId))
+      if (units.length) await tx.insert(schema.sessionUnits).values(units.map((unit) => ({ sessionId, unit })))
+    })
+    return this.listUnitStatuses(sessionId)
+  }
+
+  async listUnitStatuses(sessionId: string): Promise<UnitStatusRecord[]> {
+    const rows = await this.db.select().from(schema.sessionUnits).where(eq(schema.sessionUnits.sessionId, sessionId)).orderBy(asc(schema.sessionUnits.unit))
+    return rows.map((row) => this.unitFromRow(row))
+  }
+
+  async getUnitStatus(sessionId: string, unit: string): Promise<UnitStatusRecord | undefined> {
+    const [row] = await this.db.select().from(schema.sessionUnits).where(and(eq(schema.sessionUnits.sessionId, sessionId), eq(schema.sessionUnits.unit, unit))).limit(1)
+    return row ? this.unitFromRow(row) : undefined
+  }
+
+  async updateUnitStatus(sessionId: string, unit: string, update: Partial<UnitStatusRecord> & { clearArrival?: boolean }): Promise<UnitStatusRecord | undefined> {
+    await this.db.update(schema.sessionUnits).set({
+      ...(update.status ? { status: update.status } : {}),
+      ...(update.arrivedAt ? { arrivedAt: new Date(update.arrivedAt) } : {}),
+      ...(update.arrivedByClientId ? { arrivedByClientId: update.arrivedByClientId } : {}),
+      ...(update.clearArrival ? { arrivedAt: null, arrivedByClientId: null } : {}),
+    }).where(and(eq(schema.sessionUnits.sessionId, sessionId), eq(schema.sessionUnits.unit, unit)))
+    return this.getUnitStatus(sessionId, unit)
+  }
+
+  private benchmarkFromRow(row: typeof schema.sessionBenchmarks.$inferSelect): SessionBenchmarkRecord {
+    return { id: row.id, sessionId: row.sessionId, sourceBenchmarkId: row.sourceBenchmarkId, label: row.label, description: row.description, ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}), ...(row.completedElapsedMs === null ? {} : { completedElapsedMs: row.completedElapsedMs }), ...(row.completedByClientId ? { completedByClientId: row.completedByClientId } : {}), createdAt: row.createdAt.toISOString() }
+  }
+
+  async replaceSessionBenchmarks(sessionId: string, items: Array<{ sourceBenchmarkId: string; label: string; description: string }>): Promise<SessionBenchmarkRecord[]> {
+    await this.db.transaction(async (tx) => {
+      await tx.delete(schema.sessionBenchmarks).where(eq(schema.sessionBenchmarks.sessionId, sessionId))
+      if (items.length) await tx.insert(schema.sessionBenchmarks).values(items.map((item) => ({ id: randomUUID(), sessionId, ...item })))
+    })
+    return this.listSessionBenchmarks(sessionId)
+  }
+
+  async listSessionBenchmarks(sessionId: string): Promise<SessionBenchmarkRecord[]> {
+    const rows = await this.db.select().from(schema.sessionBenchmarks).where(eq(schema.sessionBenchmarks.sessionId, sessionId)).orderBy(asc(schema.sessionBenchmarks.createdAt))
+    return rows.map((row) => this.benchmarkFromRow(row))
+  }
+
+  async getSessionBenchmark(id: string): Promise<SessionBenchmarkRecord | undefined> {
+    const [row] = await this.db.select().from(schema.sessionBenchmarks).where(eq(schema.sessionBenchmarks.id, id)).limit(1)
+    return row ? this.benchmarkFromRow(row) : undefined
+  }
+
+  async updateSessionBenchmark(id: string, update: Partial<SessionBenchmarkRecord> & { clearCompletion?: boolean }): Promise<SessionBenchmarkRecord | undefined> {
+    await this.db.update(schema.sessionBenchmarks).set({
+      ...(update.completedAt ? { completedAt: new Date(update.completedAt) } : {}),
+      ...(update.completedElapsedMs !== undefined ? { completedElapsedMs: update.completedElapsedMs } : {}),
+      ...(update.completedByClientId ? { completedByClientId: update.completedByClientId } : {}),
+      ...(update.clearCompletion ? { completedAt: null, completedElapsedMs: null, completedByClientId: null } : {}),
+    }).where(eq(schema.sessionBenchmarks.id, id))
+    return this.getSessionBenchmark(id)
+  }
+
+  private evolutionFromRow(row: typeof schema.evolutionRuns.$inferSelect): EvolutionRunRecord {
+    return { id: row.id, sessionId: row.sessionId, unit: row.unit, evolutionId: row.evolutionId, label: row.label, status: row.status as EvolutionRunRecord['status'], startedAt: row.startedAt.toISOString(), startedElapsedMs: row.startedElapsedMs, startedByClientId: row.startedByClientId, startedByName: row.startedByName, ...(row.completedAt ? { completedAt: row.completedAt.toISOString() } : {}), ...(row.completedElapsedMs === null ? {} : { completedElapsedMs: row.completedElapsedMs }), ...(row.completedByClientId ? { completedByClientId: row.completedByClientId } : {}) }
+  }
+
+  async createEvolutionRun(input: Omit<EvolutionRunRecord, 'id'>): Promise<EvolutionRunRecord> {
+    const id = randomUUID()
+    await this.db.insert(schema.evolutionRuns).values({ id, sessionId: input.sessionId, unit: input.unit, evolutionId: input.evolutionId, label: input.label, status: input.status, startedAt: new Date(input.startedAt), startedElapsedMs: input.startedElapsedMs, startedByClientId: input.startedByClientId, startedByName: input.startedByName })
+    const created = await this.getEvolutionRun(id)
+    if (!created) throw new Error('Evolution insert failed')
+    return created
+  }
+
+  async getEvolutionRun(id: string): Promise<EvolutionRunRecord | undefined> {
+    const [row] = await this.db.select().from(schema.evolutionRuns).where(eq(schema.evolutionRuns.id, id)).limit(1)
+    return row ? this.evolutionFromRow(row) : undefined
+  }
+
+  async listEvolutionRuns(sessionId: string): Promise<EvolutionRunRecord[]> {
+    const rows = await this.db.select().from(schema.evolutionRuns).where(eq(schema.evolutionRuns.sessionId, sessionId)).orderBy(asc(schema.evolutionRuns.startedAt))
+    return rows.map((row) => this.evolutionFromRow(row))
+  }
+
+  async updateEvolutionRun(id: string, update: Partial<EvolutionRunRecord>): Promise<EvolutionRunRecord | undefined> {
+    await this.db.update(schema.evolutionRuns).set({
+      ...(update.status ? { status: update.status } : {}),
+      ...(update.completedAt ? { completedAt: new Date(update.completedAt) } : {}),
+      ...(update.completedElapsedMs !== undefined ? { completedElapsedMs: update.completedElapsedMs } : {}),
+      ...(update.completedByClientId ? { completedByClientId: update.completedByClientId } : {}),
+    }).where(eq(schema.evolutionRuns.id, id))
+    return this.getEvolutionRun(id)
   }
 
   async addParticipant(participant: ParticipantRecord): Promise<void> {

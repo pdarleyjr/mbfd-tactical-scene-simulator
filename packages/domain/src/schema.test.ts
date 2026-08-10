@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createRoomInputSchema,
   firegroundObjectSchema,
   joinSessionInputSchema,
   scenarioInputSchema,
@@ -20,11 +21,29 @@ describe('domain schemas', () => {
     expect(parsed.worldWidth / parsed.worldHeight).toBeCloseTo(1586 / 992)
   })
 
-  it('rejects malformed room codes and allows several users to select the same unit', () => {
-    expect(() => joinSessionInputSchema.parse({ code: '12', name: 'Smith', role: 'crew', unit: 'E2' })).toThrow()
-    const captain = joinSessionInputSchema.parse({ code: 'A7K4M2', name: 'Captain', role: 'crew', unit: 'E2' })
-    const engineer = joinSessionInputSchema.parse({ code: 'A7K4M2', name: 'Engineer', role: 'crew', unit: 'E2' })
+  it('joins a selected room session with an optional access PIN and no room-code field', () => {
+    const sessionId = '11111111-1111-4111-8111-111111111111'
+    const captain = joinSessionInputSchema.parse({ sessionId, roomPin: '2300', name: 'Captain', role: 'crew', unit: 'E2' })
+    const engineer = joinSessionInputSchema.parse({ sessionId, name: 'Engineer', role: 'crew', unit: 'E2' })
     expect(captain.unit).toBe(engineer.unit)
+    expect(captain.roomPin).toBe('2300')
+    expect('code' in captain).toBe(false)
+  })
+
+  it('defines named rooms with optional PIN access and configurable scenario benchmarks', () => {
+    expect(createRoomInputSchema.parse({ name: 'North Operations' })).toEqual({ name: 'North Operations' })
+    expect(createRoomInputSchema.parse({ name: 'North Operations', accessPin: '4412' })).toEqual({ name: 'North Operations', accessPin: '4412' })
+    const scenario = scenarioInputSchema.parse({
+      title: 'Residential Structure Fire',
+      description: 'Training scene',
+      worldWidth: 1600,
+      worldHeight: 1000,
+      apparatusTemplateIds: ['E1'],
+      evolutionIds: ['jumpline'],
+      benchmarks: [{ id: 'water-established', label: 'Water supply established', description: 'Sustained supply is connected.' }],
+      injects: [],
+    })
+    expect(scenario.benchmarks[0]?.label).toBe('Water supply established')
   })
 
   it('requires attribution and logical world coordinates on tactical objects', () => {

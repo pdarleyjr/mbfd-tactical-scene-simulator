@@ -33,6 +33,6 @@ jobs:
           mkdir -p secrets
           printf 'ci-database-password' > secrets/database_password
           printf 'ci-signing-secret-that-is-at-least-32-characters' > secrets/session_signing_secret
-          printf '246810' > secrets/instructor_pin
+          printf '2300' > secrets/instructor_pin
           docker compose config --quiet
           docker compose build

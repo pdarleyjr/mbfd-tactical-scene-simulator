@@ -5,7 +5,10 @@ import type { BootstrapResponse } from '../api/types'
 export function useBootstrap(sessionId: string, token: string | undefined) {
   const cacheKey = `mbfd-bootstrap-${sessionId}`
   const cached = typeof window === 'undefined' ? undefined : (() => {
-    try { return JSON.parse(localStorage.getItem(cacheKey) ?? 'null') as BootstrapResponse | undefined }
+    try {
+      const value = JSON.parse(localStorage.getItem(cacheKey) ?? 'null') as BootstrapResponse | null
+      return value ?? undefined
+    }
     catch { return undefined }
   })()
   return useQuery({
@@ -21,7 +24,7 @@ export function useBootstrap(sessionId: string, token: string | undefined) {
         throw error
       }
     },
-    initialData: cached,
+    ...(cached ? { initialData: cached, initialDataUpdatedAt: 0 } : {}),
     enabled: Boolean(sessionId && token),
   })
 }

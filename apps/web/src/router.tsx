@@ -12,7 +12,7 @@ const ReviewPage = lazyRouteComponent(() => import('./pages/ReviewPage'), 'Revie
 const rootRoute = createRootRoute({ component: Outlet, notFoundComponent: NotFoundPage })
 const routeTree = rootRoute.addChildren([
   createRoute({ getParentRoute: () => rootRoute, path: '/', component: HomePage }),
-  createRoute({ getParentRoute: () => rootRoute, path: '/join/$code', component: JoinPage }),
+  createRoute({ getParentRoute: () => rootRoute, path: '/join/$roomId', component: JoinPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/session/$sessionId', component: SessionPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/instructor/$sessionId', component: InstructorPage }),
   createRoute({ getParentRoute: () => rootRoute, path: '/present/$sessionId', component: PresentationPage }),

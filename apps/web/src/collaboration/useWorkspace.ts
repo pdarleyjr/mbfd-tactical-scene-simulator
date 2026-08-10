@@ -18,7 +18,15 @@ export function useWorkspace(input: {
   token: string
   identity: { clientId: string; name: string; unit: string; role: string }
   enabled?: boolean
+  onAuthenticationFailed?: () => void
 }) {
+  const enabled = input.enabled
+  const token = input.token
+  const clientId = input.identity.clientId
+  const identityName = input.identity.name
+  const identityUnit = input.identity.unit
+  const identityRole = input.identity.role
+  const onAuthenticationFailed = input.onAuthenticationFailed
   const [objects, setObjects] = useState<FiregroundObject[]>([])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [presence, setPresence] = useState<Array<Record<string, unknown>>>([])
@@ -27,20 +35,30 @@ export function useWorkspace(input: {
   const providerRef = useRef<HocuspocusProvider | null>(null)
 
   useEffect(() => {
-    if (input.enabled === false) return
+    if (enabled === false) return
     ensureTacticalDocument(document)
     const persistence = new IndexeddbPersistence(name, document)
+    let authenticationRejected = false
+    const handleOnline = () => setStatus('connecting')
+    const handleOffline = () => setStatus('offline')
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
     const provider = new HocuspocusProvider({
       url: collaborationUrl(),
       name,
       document,
-      token: input.token,
+      token,
       onStatus: ({ status: providerStatus }) => setStatus(providerStatus === 'connected' ? 'connected' : 'connecting'),
-      onClose: () => setStatus(navigator.onLine ? 'connecting' : 'offline'),
-      onAuthenticationFailed: () => setStatus('error'),
+      onClose: () => setStatus(authenticationRejected ? 'error' : navigator.onLine ? 'connecting' : 'offline'),
+      onAuthenticationFailed: () => {
+        authenticationRejected = true
+        setStatus('error')
+        onAuthenticationFailed?.()
+        queueMicrotask(() => provider.destroy())
+      },
     })
     providerRef.current = provider
-    provider.setAwarenessField('user', { clientId: input.identity.clientId, name: input.identity.name, unit: input.identity.unit, role: input.identity.role })
+    provider.setAwarenessField('user', { clientId, name: identityName, unit: identityUnit, role: identityRole })
 
     const refresh = () => setObjects(listFiregroundObjects(document))
     const refreshPresence = () => setPresence(Array.from(provider.awareness?.getStates().values() ?? []).map((state) => state as Record<string, unknown>))
@@ -54,9 +72,11 @@ export function useWorkspace(input: {
       provider.off('awarenessUpdate', refreshPresence)
       provider.destroy()
       providerRef.current = null
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
       void persistence.destroy()
     }
-  }, [document, input.enabled, input.identity.clientId, input.identity.name, input.identity.role, input.identity.unit, input.token, name])
+  }, [clientId, document, enabled, identityName, identityRole, identityUnit, name, onAuthenticationFailed, token])
 
   useEffect(() => () => document.destroy(), [document])
 

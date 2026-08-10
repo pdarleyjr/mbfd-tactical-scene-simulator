@@ -44,7 +44,7 @@ export function loadConfig(): ServerConfig {
     collabPort,
     databaseUrl,
     signingSecret,
-    instructorPin: fromEnvironment('INSTRUCTOR_PIN', '246810'),
+    instructorPin: fromEnvironment('INSTRUCTOR_PIN', '2300'),
     publicBaseUrl: fromEnvironment('PUBLIC_BASE_URL', `http://127.0.0.1:${port}`),
     assetStoragePath: path.resolve(fromEnvironment('ASSET_STORAGE_PATH', './data/assets')),
     release: fromEnvironment('APP_RELEASE', 'development'),

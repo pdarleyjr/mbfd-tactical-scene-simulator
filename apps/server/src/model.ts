@@ -29,6 +29,7 @@ export interface ScenarioRecord extends ScenarioInput {
 export interface SessionRecord {
   id: string
   code: string
+  roomId: string
   scenarioId: string
   participatingUnits: string[]
   mode300: Mode300
@@ -38,6 +39,51 @@ export interface SessionRecord {
   updatedAt: string
   frozen300Plan?: Uint8Array
   presentationMode: 'operations' | '300-plan' | 'split' | 'overlay'
+}
+
+export interface RoomRecord {
+  id: string
+  name: string
+  accessPinHash?: string
+  archived: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface UnitStatusRecord {
+  sessionId: string
+  unit: string
+  status: 'staged' | 'arrived'
+  arrivedAt?: string
+  arrivedByClientId?: string
+}
+
+export interface EvolutionRunRecord {
+  id: string
+  sessionId: string
+  unit: string
+  evolutionId: string
+  label: string
+  status: 'active' | 'complete'
+  startedAt: string
+  startedElapsedMs: number
+  startedByClientId: string
+  startedByName: string
+  completedAt?: string
+  completedElapsedMs?: number
+  completedByClientId?: string
+}
+
+export interface SessionBenchmarkRecord {
+  id: string
+  sessionId: string
+  sourceBenchmarkId: string
+  label: string
+  description: string
+  completedAt?: string
+  completedElapsedMs?: number
+  completedByClientId?: string
+  createdAt: string
 }
 
 export interface ParticipantRecord {

@@ -4,7 +4,7 @@ An installable, multi-user tactical fireground training system for Miami Beach F
 
 ## Operational model
 
-- Participants join with a six-character incident code, name, role, and unit; conventional accounts are not required.
+- Participants choose a named training room, then enter their name, role, and assigned unit. A room may be open or protected by an optional instructor-selected numeric PIN; conventional accounts are not required.
 - E1, E2, E3, E4, L1, and L3 share one Operations document. Multiple people may join the same company.
 - Every object carries creator client, name, unit, and timestamps. Crew members can alter their unit's objects; Command 300 and instructors have broader permissions.
 - Independent 300 uses a separate private Yjs document. Live 300 uses Operations. The Independent-to-Live transition snapshots the private document and changes the session to Hybrid so both documents remain available.
