@@ -14,11 +14,11 @@ export interface TacticalRepository {
   listRooms(): Promise<RoomRecord[]>
   getRoom(id: string): Promise<RoomRecord | undefined>
   updateRoom(id: string, update: Partial<Pick<RoomRecord, 'name' | 'accessPinHash' | 'archived'>> & { clearAccessPin?: boolean }): Promise<RoomRecord | undefined>
-  createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<SessionRecord>
+  createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'accumulatedElapsedMs'> & { accumulatedElapsedMs?: number }): Promise<SessionRecord>
   listSessions(): Promise<SessionRecord[]>
   getSession(id: string): Promise<SessionRecord | undefined>
   getSessionByCode(code: string): Promise<SessionRecord | undefined>
-  updateSession(id: string, update: Partial<SessionRecord>): Promise<SessionRecord | undefined>
+  updateSession(id: string, update: Partial<SessionRecord> & { clearTimerAnchor?: boolean }): Promise<SessionRecord | undefined>
   replaceSessionUnits(sessionId: string, units: string[]): Promise<UnitStatusRecord[]>
   listUnitStatuses(sessionId: string): Promise<UnitStatusRecord[]>
   getUnitStatus(sessionId: string, unit: string): Promise<UnitStatusRecord | undefined>

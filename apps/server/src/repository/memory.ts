@@ -29,7 +29,7 @@ export class MemoryRepository implements TacticalRepository {
   async close(): Promise<void> {}
 
   async listScenarios(): Promise<ScenarioRecord[]> {
-    return [...this.scenarios.values()].map((scenario) => structuredClone(scenario))
+    return [...this.scenarios.values()].filter((scenario) => !scenario.archived).map((scenario) => structuredClone(scenario))
   }
 
   async getScenario(id: string): Promise<ScenarioRecord | undefined> {
@@ -44,6 +44,7 @@ export class MemoryRepository implements TacticalRepository {
       id: input.id ?? randomUUID(),
       slug: input.slug ?? slugify(input.title),
       assets: [],
+      archived: false,
       createdAt: now,
       updatedAt: now,
     }
@@ -60,8 +61,11 @@ export class MemoryRepository implements TacticalRepository {
   }
 
   async deleteScenario(id: string): Promise<boolean> {
-    if ([...this.sessions.values()].some((session) => session.scenarioId === id)) throw new Error('Scenario is used by a training session and cannot be deleted.')
-    return this.scenarios.delete(id)
+    const current = this.scenarios.get(id)
+    if (!current) return false
+    current.archived = true
+    current.updatedAt = new Date().toISOString()
+    return true
   }
 
   async addScenarioAsset(asset: ScenarioAssetRecord): Promise<void> {
@@ -99,11 +103,11 @@ export class MemoryRepository implements TacticalRepository {
     return structuredClone(updated)
   }
 
-  async createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<SessionRecord> {
+  async createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'accumulatedElapsedMs'> & { accumulatedElapsedMs?: number }): Promise<SessionRecord> {
     let code = createRoomCode()
     while ([...this.sessions.values()].some((session) => session.code === code)) code = createRoomCode()
     const now = new Date().toISOString()
-    const session: SessionRecord = { ...input, id: randomUUID(), code, createdAt: now, updatedAt: now }
+    const session: SessionRecord = { ...input, id: randomUUID(), code, accumulatedElapsedMs: input.accumulatedElapsedMs ?? 0, createdAt: now, updatedAt: now }
     this.sessions.set(session.id, session)
     return structuredClone(session)
   }
@@ -127,10 +131,12 @@ export class MemoryRepository implements TacticalRepository {
     return session.frozen300Plan ? { ...cloned, frozen300Plan: new Uint8Array(session.frozen300Plan) } : cloned
   }
 
-  async updateSession(id: string, update: Partial<SessionRecord>): Promise<SessionRecord | undefined> {
+  async updateSession(id: string, update: Partial<SessionRecord> & { clearTimerAnchor?: boolean }): Promise<SessionRecord | undefined> {
     const current = this.sessions.get(id)
     if (!current) return undefined
     const updated = { ...current, ...update, id, code: current.code, updatedAt: new Date().toISOString() }
+    delete (updated as SessionRecord & { clearTimerAnchor?: boolean }).clearTimerAnchor
+    if (update.clearTimerAnchor) delete updated.timerAnchorAt
     this.sessions.set(id, updated)
     const cloned = structuredClone(updated)
     return updated.frozen300Plan ? { ...cloned, frozen300Plan: new Uint8Array(updated.frozen300Plan) } : cloned

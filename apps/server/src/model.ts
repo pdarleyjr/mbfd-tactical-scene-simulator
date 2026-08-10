@@ -22,6 +22,7 @@ export interface ScenarioRecord extends ScenarioInput {
   backgroundAssetId?: string
   videoAssetId?: string
   assets: ScenarioAssetRecord[]
+  archived: boolean
   createdAt: string
   updatedAt: string
 }
@@ -35,6 +36,8 @@ export interface SessionRecord {
   mode300: Mode300
   status: 'setup' | 'running' | 'frozen' | 'complete'
   startedAt?: string
+  accumulatedElapsedMs: number
+  timerAnchorAt?: string
   createdAt: string
   updatedAt: string
   frozen300Plan?: Uint8Array

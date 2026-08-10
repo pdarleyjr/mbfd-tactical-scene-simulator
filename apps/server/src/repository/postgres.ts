@@ -107,6 +107,7 @@ export class PostgresRepository implements TacticalRepository {
       staticObjects: row.staticObjects,
       ...(row.backgroundAssetId ? { backgroundAssetId: row.backgroundAssetId } : {}),
       ...(row.videoAssetId ? { videoAssetId: row.videoAssetId } : {}),
+      archived: row.archived,
       assets: await this.assetsForScenario(row.id),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
@@ -114,7 +115,7 @@ export class PostgresRepository implements TacticalRepository {
   }
 
   async listScenarios(): Promise<ScenarioRecord[]> {
-    const rows = await this.db.select().from(schema.scenarios)
+    const rows = await this.db.select().from(schema.scenarios).where(eq(schema.scenarios.archived, false)).orderBy(desc(schema.scenarios.updatedAt))
     return Promise.all(rows.map((row) => this.scenarioFromRow(row)))
   }
 
@@ -140,6 +141,7 @@ export class PostgresRepository implements TacticalRepository {
       benchmarks: input.benchmarks,
       injects: input.injects,
       staticObjects: input.staticObjects,
+      archived: false,
       createdAt: now,
       updatedAt: now,
     })
@@ -155,9 +157,7 @@ export class PostgresRepository implements TacticalRepository {
   }
 
   async deleteScenario(id: string): Promise<boolean> {
-    const sessions = await this.db.select({ id: schema.trainingSessions.id }).from(schema.trainingSessions).where(eq(schema.trainingSessions.scenarioId, id)).limit(1)
-    if (sessions.length) throw new Error('Scenario is used by a training session and cannot be deleted.')
-    const rows = await this.db.delete(schema.scenarios).where(eq(schema.scenarios.id, id)).returning({ id: schema.scenarios.id })
+    const rows = await this.db.update(schema.scenarios).set({ archived: true, updatedAt: new Date() }).where(eq(schema.scenarios.id, id)).returning({ id: schema.scenarios.id })
     return rows.length > 0
   }
 
@@ -210,6 +210,8 @@ export class PostgresRepository implements TacticalRepository {
       mode300: row.mode300 as Mode300,
       status: row.status as SessionRecord['status'],
       ...(row.startedAt ? { startedAt: row.startedAt.toISOString() } : {}),
+      accumulatedElapsedMs: row.accumulatedElapsedMs,
+      ...(row.timerAnchorAt ? { timerAnchorAt: row.timerAnchorAt.toISOString() } : {}),
       ...(row.frozen300Plan ? { frozen300Plan: new Uint8Array(row.frozen300Plan) } : {}),
       presentationMode: row.presentationMode as SessionRecord['presentationMode'],
       createdAt: row.createdAt.toISOString(),
@@ -217,7 +219,7 @@ export class PostgresRepository implements TacticalRepository {
     }
   }
 
-  async createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt'>): Promise<SessionRecord> {
+  async createSession(input: Omit<SessionRecord, 'id' | 'code' | 'createdAt' | 'updatedAt' | 'accumulatedElapsedMs'> & { accumulatedElapsedMs?: number }): Promise<SessionRecord> {
     let code = createRoomCode()
     while (await this.getSessionByCode(code)) code = createRoomCode()
     const id = randomUUID()
@@ -225,6 +227,8 @@ export class PostgresRepository implements TacticalRepository {
       id, code, roomId: input.roomId, scenarioId: input.scenarioId, participatingUnits: input.participatingUnits,
       mode300: input.mode300, status: input.status, presentationMode: input.presentationMode,
       ...(input.startedAt ? { startedAt: new Date(input.startedAt) } : {}),
+      accumulatedElapsedMs: input.accumulatedElapsedMs ?? 0,
+      ...(input.timerAnchorAt ? { timerAnchorAt: new Date(input.timerAnchorAt) } : {}),
       ...(input.frozen300Plan ? { frozen300Plan: Buffer.from(input.frozen300Plan) } : {}),
     })
     const created = await this.getSession(id)
@@ -247,7 +251,7 @@ export class PostgresRepository implements TacticalRepository {
     return row ? this.sessionFromRow(row) : undefined
   }
 
-  async updateSession(id: string, update: Partial<SessionRecord>): Promise<SessionRecord | undefined> {
+  async updateSession(id: string, update: Partial<SessionRecord> & { clearTimerAnchor?: boolean }): Promise<SessionRecord | undefined> {
     await this.db.update(schema.trainingSessions).set({
       ...(update.roomId ? { roomId: update.roomId } : {}),
       ...(update.scenarioId ? { scenarioId: update.scenarioId } : {}),
@@ -255,6 +259,9 @@ export class PostgresRepository implements TacticalRepository {
       ...(update.mode300 ? { mode300: update.mode300 } : {}),
       ...(update.status ? { status: update.status } : {}),
       ...(update.startedAt ? { startedAt: new Date(update.startedAt) } : {}),
+      ...(update.accumulatedElapsedMs !== undefined ? { accumulatedElapsedMs: update.accumulatedElapsedMs } : {}),
+      ...(update.timerAnchorAt ? { timerAnchorAt: new Date(update.timerAnchorAt) } : {}),
+      ...(update.clearTimerAnchor ? { timerAnchorAt: null } : {}),
       ...(update.frozen300Plan ? { frozen300Plan: Buffer.from(update.frozen300Plan) } : {}),
       ...(update.presentationMode ? { presentationMode: update.presentationMode } : {}),
       updatedAt: new Date(),

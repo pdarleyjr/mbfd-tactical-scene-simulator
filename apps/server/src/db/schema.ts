@@ -21,6 +21,7 @@ export const scenarios = pgTable('scenarios', {
   staticObjects: jsonb('static_objects').$type<ScenarioInput['staticObjects']>().notNull().default([]),
   backgroundAssetId: uuid('background_asset_id'),
   videoAssetId: uuid('video_asset_id'),
+  archived: boolean('archived').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [index('scenarios_updated_idx').on(table.updatedAt)])
@@ -117,6 +118,8 @@ export const trainingSessions = pgTable('training_sessions', {
   mode300: text('mode_300').notNull(),
   status: text('status').notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }),
+  accumulatedElapsedMs: integer('accumulated_elapsed_ms').notNull().default(0),
+  timerAnchorAt: timestamp('timer_anchor_at', { withTimezone: true }),
   frozen300Plan: bytea('frozen_300_plan'),
   presentationMode: text('presentation_mode').notNull().default('operations'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

@@ -12,7 +12,7 @@ export function ContextToolbar(props: { mode: CanvasMode; selected: boolean; can
     <button className="btn btn-secondary !min-h-10 !px-3" onClick={props.onFit}><Crosshair size={17}/><span className="hidden lg:inline">Fit</span></button>
     {props.command300 && <div className="ml-auto flex gap-1"><button className={`btn !min-h-10 !px-3 ${props.workspace === '300-plan' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => props.onWorkspace('300-plan')}><Map size={17}/>Private 300</button><button className={`btn !min-h-10 !px-3 ${props.workspace === 'operations' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => props.onWorkspace('operations')}><ZoomIn size={17}/>Operations</button></div>}
     {props.selected && <button disabled={!props.canDelete} className="btn btn-danger !min-h-10 !px-3" onClick={props.onDelete}><Trash2 size={17}/><span className="hidden lg:inline">Delete</span></button>}
-    {props.mode.startsWith('hose-') && <span className="muted flex min-h-10 items-center px-2 text-sm"><RotateCcw size={15} className="mr-1"/>Tap start, turns, endpoint</span>}
+    {props.mode.startsWith('hose-') && <span className="muted flex min-h-10 items-center px-2 text-sm"><RotateCcw size={15} className="mr-1"/>Click each hose point, then Finish line</span>}
     {!props.hoseEnabled && <span className="muted hidden min-h-10 items-center px-2 text-sm xl:flex">Start an evolution to draw hose</span>}
   </nav>
 }

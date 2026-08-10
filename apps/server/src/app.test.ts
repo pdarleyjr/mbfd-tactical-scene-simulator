@@ -3,7 +3,7 @@ import { createApp } from './app.js'
 import { MemoryRepository } from './repository/memory.js'
 import { verifySessionToken } from './security/tokens.js'
 
-async function setup() {
+async function setup(now?: () => Date) {
   const repository = new MemoryRepository()
   const app = await createApp({
     repository,
@@ -12,6 +12,7 @@ async function setup() {
     assetStoragePath: 'test-assets',
     publicBaseUrl: 'http://localhost:8230',
     enableRateLimit: false,
+    ...(now ? { now } : {}),
   })
   return { app, repository }
 }
@@ -170,7 +171,37 @@ describe('session and authorization API', () => {
       expect.objectContaining({ eventType: 'session-running' }),
       expect.objectContaining({ eventType: 'inject-revealed' }),
     ]))
-    expect((await app.inject({ method: 'DELETE', url: `/api/scenarios/${scenario.id}`, headers: authorization })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'DELETE', url: `/api/scenarios/${scenario.id}`, headers: authorization })).statusCode).toBe(204)
+    expect((await app.inject({ method: 'GET', url: '/api/scenarios' })).json().items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: scenario.id }),
+    ]))
+    expect((await app.inject({ method: 'GET', url: `/api/scenarios/${scenario.id}` })).statusCode).toBe(200)
+    await app.close()
+  })
+
+  it('starts, pauses, resumes, and completes a scenario timer without counting frozen time', async () => {
+    let clock = new Date('2026-08-10T12:00:00.000Z')
+    const { app } = await setup(() => clock)
+    const login = await app.inject({ method: 'POST', url: '/api/instructor/session', payload: { pin: '246810' } })
+    const authorization = { authorization: `Bearer ${login.json().token as string}` }
+    const scenarioId = (await app.inject({ method: 'GET', url: '/api/scenarios' })).json().items[0].id as string
+    const room = await app.inject({ method: 'POST', url: '/api/rooms', headers: authorization, payload: { name: 'Timer Training Room' } })
+    const created = await app.inject({ method: 'POST', url: '/api/sessions', headers: authorization, payload: { roomId: room.json().id, scenarioId, participatingUnits: ['E1'], mode300: 'live', benchmarkIds: [] } })
+    const sessionId = created.json().id as string
+
+    const started = await app.inject({ method: 'PATCH', url: `/api/sessions/${sessionId}`, headers: authorization, payload: { status: 'running' } })
+    expect(started.json()).toEqual(expect.objectContaining({ status: 'running', elapsedMs: 0 }))
+    clock = new Date('2026-08-10T12:01:05.000Z')
+    const frozen = await app.inject({ method: 'PATCH', url: `/api/sessions/${sessionId}`, headers: authorization, payload: { status: 'frozen' } })
+    expect(frozen.json().elapsedMs).toBe(65_000)
+    clock = new Date('2026-08-10T12:01:35.000Z')
+    const whileFrozen = await app.inject({ method: 'GET', url: `/api/sessions/${sessionId}/bootstrap`, headers: authorization })
+    expect(whileFrozen.json().session.elapsedMs).toBe(65_000)
+    await app.inject({ method: 'PATCH', url: `/api/sessions/${sessionId}`, headers: authorization, payload: { status: 'running' } })
+    clock = new Date('2026-08-10T12:01:40.000Z')
+    const completed = await app.inject({ method: 'PATCH', url: `/api/sessions/${sessionId}`, headers: authorization, payload: { status: 'complete' } })
+    expect(completed.json().elapsedMs).toBe(70_000)
+
     await app.close()
   })
 })

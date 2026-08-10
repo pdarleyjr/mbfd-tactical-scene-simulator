@@ -29,6 +29,7 @@ export interface SessionView {
   status: 'setup' | 'running' | 'frozen' | 'complete'
   createdAt: string
   startedAt?: string
+  elapsedMs: number
   presentationMode: 'operations' | '300-plan' | 'split' | 'overlay'
 }
 

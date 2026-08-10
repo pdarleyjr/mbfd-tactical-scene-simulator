@@ -12,6 +12,7 @@ import {
   tacticalCollections,
 } from '@mbfd/collaboration'
 import type { TacticalRepository } from '../repository/repository.js'
+import { sessionElapsedMs } from '../timer.js'
 import { verifyControllerToken, verifySessionToken } from '../security/tokens.js'
 
 interface ChangeRecord {
@@ -118,8 +119,7 @@ export function createCollaborationServer(options: {
       const parsed = parseDocumentName(data.documentName)
       const session = parsed ? await options.repository.getSession(parsed.sessionId) : undefined
       if (!parsed || !session) return
-      const origin = session.startedAt ?? session.createdAt
-      const elapsedMs = Math.max(0, Date.now() - new Date(origin).getTime())
+      const elapsedMs = sessionElapsedMs(session)
       for (const change of context.pendingChanges) {
         await options.repository.appendEvent({
           id: randomUUID(),

@@ -27,6 +27,7 @@ import {
   verifySessionToken,
 } from './security/tokens.js'
 import { hashRoomPin, roomPinMatches } from './security/room-pins.js'
+import { sessionElapsedMs } from './timer.js'
 
 export interface AppOptions {
   repository: TacticalRepository
@@ -36,6 +37,7 @@ export interface AppOptions {
   publicBaseUrl: string
   enableRateLimit?: boolean
   release?: string
+  now?: () => Date
 }
 
 function bearerToken(request: FastifyRequest): string {
@@ -56,17 +58,13 @@ function scenarioResponse<T extends { assets: Array<{ runtimePath: string; thumb
   }
 }
 
-function elapsedMs(session: { startedAt?: string; createdAt: string }): number {
-  return Math.max(0, Date.now() - new Date(session.startedAt ?? session.createdAt).getTime())
-}
-
-function sessionResponse<T extends { code: string }>(session: T): Omit<T, 'code'> {
-  const { code: _legacyCode, ...response } = session
-  return response
-}
-
 export async function createApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024, trustProxy: true })
+  const now = options.now ?? (() => new Date())
+  function sessionResponse<T extends Parameters<typeof sessionElapsedMs>[0] & { code: string }>(session: T) {
+    const { code: _legacyCode, accumulatedElapsedMs: _accumulated, timerAnchorAt: _anchor, ...response } = session
+    return { ...response, elapsedMs: sessionElapsedMs(session, now()) }
+  }
   await options.repository.initialize()
 
   if (options.enableRateLimit !== false) {
@@ -97,7 +95,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     service: 'mbfd-tactical-scene-simulator',
     release: options.release ?? 'development',
     node: process.version,
-    timestamp: new Date().toISOString(),
+    timestamp: now().toISOString(),
   }))
 
   app.post('/api/instructor/session', async (request, reply) => {
@@ -277,14 +275,18 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     if (!status && !presentationMode) return reply.code(400).send({ error: 'A valid status or presentation mode is required.' })
     const existing = await options.repository.getSession(request.params.id)
     if (!existing) return reply.code(404).send({ error: 'Session not found.' })
+    const transitionAt = now()
+    const statusChanged = Boolean(status && status !== existing.status)
     const updated = await options.repository.updateSession(existing.id, {
       ...(status ? { status } : {}),
-      ...(status === 'running' && !existing.startedAt ? { startedAt: new Date().toISOString() } : {}),
+      ...(status === 'running' && !existing.startedAt ? { startedAt: transitionAt.toISOString() } : {}),
+      ...(statusChanged && existing.status === 'running' ? { accumulatedElapsedMs: sessionElapsedMs(existing, transitionAt) } : {}),
+      ...(statusChanged && status === 'running' ? { timerAnchorAt: transitionAt.toISOString() } : {}),
+      ...(statusChanged && status !== 'running' ? { clearTimerAnchor: true } : {}),
       ...(presentationMode ? { presentationMode } : {}),
     })
-    if (status && status !== existing.status) {
-      const now = new Date().toISOString()
-      await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: existing.id, workspace: 'operations', elapsedMs: elapsedMs(updated ?? existing), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: `session-${status}`, metadata: {} }))
+    if (status && statusChanged) {
+      await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: existing.id, workspace: 'operations', elapsedMs: sessionElapsedMs(updated ?? existing, transitionAt), occurredAt: transitionAt.toISOString(), actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: `session-${status}`, metadata: {} }))
     }
     return updated ? sessionResponse(updated) : updated
   })
@@ -371,7 +373,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     const updated = await options.repository.updateUnitStatus(session.id, current.unit, body.status === 'arrived'
       ? { status: 'arrived', arrivedAt: now, arrivedByClientId: controller.clientId }
       : { status: 'staged', clearArrival: true })
-    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: elapsedMs(session), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.status === 'arrived' ? 'unit-arrived' : 'unit-staged', metadata: { unit: current.unit } }))
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: sessionElapsedMs(session), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.status === 'arrived' ? 'unit-arrived' : 'unit-staged', metadata: { unit: current.unit } }))
     return updated
   })
 
@@ -390,7 +392,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     const active = (await options.repository.listEvolutionRuns(session.id)).find((run) => run.unit === claims.unit && run.status === 'active')
     if (active) return reply.code(409).send({ error: `${claims.unit} already has an active evolution.` })
     const now = new Date().toISOString()
-    const run = await options.repository.createEvolutionRun({ sessionId: session.id, unit: claims.unit, evolutionId: evolution.id, label: evolution.label, status: 'active', startedAt: now, startedElapsedMs: elapsedMs(session), startedByClientId: claims.clientId, startedByName: claims.name })
+    const run = await options.repository.createEvolutionRun({ sessionId: session.id, unit: claims.unit, evolutionId: evolution.id, label: evolution.label, status: 'active', startedAt: now, startedElapsedMs: sessionElapsedMs(session), startedByClientId: claims.clientId, startedByName: claims.name })
     await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: run.startedElapsedMs, occurredAt: now, actorClientId: claims.clientId, actorName: claims.name, actorUnit: claims.unit, eventType: 'evolution-started', objectId: run.id, metadata: { evolutionId: run.evolutionId, label: run.label } }))
     return reply.code(201).send(run)
   })
@@ -405,8 +407,8 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     if (run.unit !== claims.unit) return reply.code(403).send({ error: 'Only the assigned unit can complete this evolution.' })
     if (run.status === 'complete') return run
     const now = new Date().toISOString()
-    const completed = await options.repository.updateEvolutionRun(run.id, { status: 'complete', completedAt: now, completedElapsedMs: elapsedMs(session), completedByClientId: claims.clientId })
-    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: completed?.completedElapsedMs ?? elapsedMs(session), occurredAt: now, actorClientId: claims.clientId, actorName: claims.name, actorUnit: claims.unit, eventType: 'evolution-completed', objectId: run.id, metadata: { evolutionId: run.evolutionId, label: run.label } }))
+    const completed = await options.repository.updateEvolutionRun(run.id, { status: 'complete', completedAt: now, completedElapsedMs: sessionElapsedMs(session), completedByClientId: claims.clientId })
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: completed?.completedElapsedMs ?? sessionElapsedMs(session), occurredAt: now, actorClientId: claims.clientId, actorName: claims.name, actorUnit: claims.unit, eventType: 'evolution-completed', objectId: run.id, metadata: { evolutionId: run.evolutionId, label: run.label } }))
     return completed
   })
 
@@ -418,9 +420,9 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     if (!session || !benchmark || benchmark.sessionId !== session.id) return reply.code(404).send({ error: 'Benchmark not found.' })
     const now = new Date().toISOString()
     const updated = await options.repository.updateSessionBenchmark(benchmark.id, body.completed
-      ? { completedAt: now, completedElapsedMs: elapsedMs(session), completedByClientId: controller.clientId }
+      ? { completedAt: now, completedElapsedMs: sessionElapsedMs(session), completedByClientId: controller.clientId }
       : { clearCompletion: true })
-    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: elapsedMs(session), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.completed ? 'benchmark-completed' : 'benchmark-reopened', objectId: benchmark.id, metadata: { label: benchmark.label } }))
+    await options.repository.appendEvent(domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: sessionElapsedMs(session), occurredAt: now, actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.completed ? 'benchmark-completed' : 'benchmark-reopened', objectId: benchmark.id, metadata: { label: benchmark.label } }))
     return updated
   })
 
@@ -440,7 +442,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
       options.repository.listSessionBenchmarks(session.id),
       options.repository.listEvents(session.id),
     ])
-    return { session: { id: session.id, status: session.status, startedAt: session.startedAt }, units, evolutions, benchmarks, events }
+    return { session: sessionResponse(session), units, evolutions, benchmarks, events }
   })
 
   app.post<{ Params: { id: string } }>('/api/sessions/:id/events', async (request, reply) => {
@@ -458,8 +460,7 @@ export async function createApp(options: AppOptions): Promise<FastifyInstance> {
     if (!session) return reply.code(404).send({ error: 'Session not found.' })
     const body = request.body as { eventType?: unknown; metadata?: unknown }
     if (typeof body.eventType !== 'string' || !body.eventType.trim()) return reply.code(400).send({ error: 'Event type is required.' })
-    const origin = session.startedAt ?? session.createdAt
-    const event = domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: Math.max(0, Date.now() - new Date(origin).getTime()), occurredAt: new Date().toISOString(), actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.eventType, metadata: typeof body.metadata === 'object' && body.metadata ? body.metadata : {} })
+    const event = domainEventSchema.parse({ id: randomUUID(), sessionId: session.id, workspace: 'operations', elapsedMs: sessionElapsedMs(session), occurredAt: new Date().toISOString(), actorClientId: controller.clientId, actorName: 'Instructor', actorUnit: 'INSTRUCTOR', eventType: body.eventType, metadata: typeof body.metadata === 'object' && body.metadata ? body.metadata : {} })
     await options.repository.appendEvent(event)
     return reply.code(201).send(event)
   })

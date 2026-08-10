@@ -31,4 +31,12 @@ export const evolutionCatalog = [
   { id: 'reverse-lay', label: 'Reverse Lay', summary: '5-inch supply from apparatus toward hydrant' },
 ] as const
 
+export const defaultBenchmarkCatalog = [
+  { id: 'command-established', label: 'Command established', description: 'The incident command function is announced and operating.' },
+  { id: 'initial-size-up', label: 'Initial size-up complete', description: 'The first-arriving unit communicates conditions, actions, and needs.' },
+  { id: 'water-supply-established', label: 'Water supply established', description: 'A sustained water supply is connected and available.' },
+  { id: 'initial-attack-line', label: 'Initial attack line in service', description: 'The initial attack line is deployed, charged, and operating.' },
+  { id: 'primary-search-complete', label: 'Primary search complete', description: 'Primary search results are reported to command.' },
+] as const
+
 export type EvolutionId = (typeof evolutionCatalog)[number]['id']
