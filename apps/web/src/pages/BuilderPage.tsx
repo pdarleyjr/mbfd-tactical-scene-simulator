@@ -32,6 +32,7 @@ export function BuilderPage() {
   const navigate = useNavigate()
   const token = useAuthStore((state) => state.instructorToken)
   const canvasRef = useRef<SceneCanvasHandle>(null)
+  const editRevision = useRef(0)
   const [scenarios, setScenarios] = useState<ScenarioView[]>([])
   const [closedScenarios, setClosedScenarios] = useState<ScenarioView[]>([])
   const [showClosed, setShowClosed] = useState(false)
@@ -57,7 +58,8 @@ export function BuilderPage() {
   const [roomSection, setRoomSection] = useState<'assignment' | 'benchmarks'>('assignment')
   const background = current?.assets.find((asset) => asset.kind === 'background')
 
-  const selectScenario = useCallback((scenario: ScenarioView | undefined) => {
+  const selectScenario = useCallback((scenario: ScenarioView | undefined, invalidatePendingRefresh = false) => {
+    if (invalidatePendingRefresh) editRevision.current += 1
     setCurrent(scenario)
     setForm(scenario ?? structuredClone(blank))
     setBenchmarkIds((scenario?.benchmarks ?? blank.benchmarks).map((benchmark) => benchmark.id))
@@ -65,11 +67,13 @@ export function BuilderPage() {
   }, [])
   const refresh = useCallback(async (selectId?: string | null) => {
     if (!token) return
+    const revisionAtStart = editRevision.current
     const result = await api<{ scenarios: ScenarioView[]; rooms: RoomView[] }>('/api/instructor/library', { token })
     const activeScenarios = result.scenarios.filter((scenario) => !scenario.archived)
     setScenarios(activeScenarios)
     setClosedScenarios(result.scenarios.filter((scenario) => scenario.archived))
     setRooms(result.rooms.filter((room) => !room.archived))
+    if (revisionAtStart !== editRevision.current) return
     const requestedId = selectId === null ? undefined : selectId ?? params.scenarioId
     selectScenario(requestedId === 'new' ? undefined : (requestedId ? activeScenarios.find((item) => item.id === requestedId) : undefined) ?? activeScenarios[0])
   }, [params.scenarioId, selectScenario, token])
@@ -77,7 +81,7 @@ export function BuilderPage() {
 
   if (!token) return <main className="shell grid min-h-dvh place-items-center p-5 text-center"><div><h1 className="display text-3xl">Instructor sign-in required</h1><Link to="/" className="btn btn-primary mt-5 no-underline">Return to sign in</Link></div></main>
 
-  function update<K extends keyof ScenarioInput>(key: K, value: ScenarioInput[K]) { setForm((state) => ({ ...state, [key]: value })) }
+  function update<K extends keyof ScenarioInput>(key: K, value: ScenarioInput[K]) { editRevision.current += 1; setForm((state) => ({ ...state, [key]: value })) }
   async function save(event?: FormEvent) {
     event?.preventDefault(); setMessage('Saving scenario…')
     try {
@@ -132,7 +136,7 @@ export function BuilderPage() {
 
   return <main className="shell viewport-page"><header className="app-header"><AppMark/><span className="ml-auto eyebrow">Instructor workspace</span></header>
     <div className="builder-workspace">
-      <aside className="scenario-library"><button type="button" className="btn btn-secondary" onClick={() => void navigate({ to: '/builder' })}><ArrowLeft size={18}/>Room setup</button><div className="min-w-0"><p className="eyebrow">Scenario library</p><label className="block"><span className="sr-only">Choose a scenario to edit</span><select aria-label="Scenario library" className="field" value={current?.id ?? ''} onChange={(event) => { const scenario = scenarios.find((item) => item.id === event.target.value); selectScenario(scenario); setShowClosed(false); setActiveTab('details'); if (scenario) void navigate({ to: '/builder/$scenarioId', params: { scenarioId: scenario.id } }) }}><option value="">Unsaved new scenario</option>{scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.title}</option>)}</select></label></div><button type="button" className="btn btn-primary" aria-label="Create new scenario" onClick={() => { selectScenario(undefined); setRoomName('New Scenario Training Room'); setShowClosed(false); setActiveTab('details'); void navigate({ to: '/builder/new' }) }}><Plus size={18}/><span className="action-label">Create new scenario</span></button><button type="button" className="btn btn-secondary" aria-label="View closed scenarios" onClick={() => setShowClosed(true)}><RotateCcw size={18}/><span className="action-label">Closed scenarios ({closedScenarios.length})</span></button><div className="scenario-summary"><strong className="display block truncate">{current?.title ?? 'New scenario'}</strong><small className="muted block">{scenarios.length} active · {closedScenarios.length} closed</small></div></aside>
+      <aside className="scenario-library"><button type="button" className="btn btn-secondary" onClick={() => void navigate({ to: '/builder' })}><ArrowLeft size={18}/>Room setup</button><div className="min-w-0"><p className="eyebrow">Scenario library</p><label className="block"><span className="sr-only">Choose a scenario to edit</span><select aria-label="Scenario library" className="field" value={current?.id ?? ''} onChange={(event) => { const scenario = scenarios.find((item) => item.id === event.target.value); selectScenario(scenario, true); setShowClosed(false); setActiveTab('details'); if (scenario) void navigate({ to: '/builder/$scenarioId', params: { scenarioId: scenario.id } }) }}><option value="">Unsaved new scenario</option>{scenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.title}</option>)}</select></label></div><button type="button" className="btn btn-primary" aria-label="Create new scenario" onClick={() => { selectScenario(undefined, true); setRoomName('New Scenario Training Room'); setShowClosed(false); setActiveTab('details'); void navigate({ to: '/builder/new' }) }}><Plus size={18}/><span className="action-label">Create new scenario</span></button><button type="button" className="btn btn-secondary" aria-label="View closed scenarios" onClick={() => setShowClosed(true)}><RotateCcw size={18}/><span className="action-label">Closed scenarios ({closedScenarios.length})</span></button><div className="scenario-summary"><strong className="display block truncate">{current?.title ?? 'New scenario'}</strong><small className="muted block">{scenarios.length} active · {closedScenarios.length} closed</small></div></aside>
       <section className="builder-main">{showClosed ? <div className="closed-scenario-panel"><div className="builder-titlebar"><div><p className="eyebrow">Recoverable library</p><h1 className="display text-2xl">Closed scenarios</h1></div><button type="button" className="btn btn-secondary" onClick={() => setShowClosed(false)}>Back to editor</button></div><div className="managed-list">{closedScenarios.slice(closedPage * 6, closedPage * 6 + 6).map((scenario) => <div className="managed-row" key={scenario.id}><span><strong>{scenario.title}</strong><small>{scenario.assets.length} assets · {scenario.staticObjects.length} placed objects · closed {new Date(scenario.updatedAt).toLocaleDateString()}</small></span><button type="button" className="btn btn-secondary" aria-label={`Restore ${scenario.title}`} onClick={() => void restoreScenario(scenario)}><RotateCcw size={17}/>Restore</button></div>)}{!closedScenarios.length && <div className="empty-workspace"><strong className="display">No closed scenarios</strong><span className="muted">Scenarios moved to closed remain recoverable here.</span></div>}</div><PageNav page={closedPage} pages={Math.max(1, Math.ceil(closedScenarios.length / 6))} label="Closed scenario" onPage={setClosedPage}/>{message && <p className="workspace-notice" role="status">{message}</p>}</div> : <form onSubmit={save} className="builder-form"><div className="builder-titlebar"><div className="min-w-0"><p className="eyebrow">Scenario builder</p><h1 className="display truncate text-2xl">{current ? 'Edit scenario' : 'Create scenario'}</h1></div><div className="builder-actions"><button type="submit" className="btn btn-primary"><Save size={18}/><span className="action-label">{current ? 'Save changes' : 'Save scenario'}</span></button>{current && <><button type="button" className="btn btn-secondary" onClick={() => void duplicate()}><Copy size={18}/><span className="action-label">Duplicate</span></button><button type="button" className="btn btn-danger" onClick={() => void remove()}><Trash2 size={18}/><span className="action-label">Move to closed</span></button></>}</div></div>
         <nav className="workspace-tabs" role="tablist" aria-label="Scenario editor sections">{builderTabs.map((tab) => <button type="button" role="tab" aria-selected={activeTab === tab.id} key={tab.id} className="workspace-tab" onClick={() => setActiveTab(tab.id)}>{tab.label}</button>)}</nav>
         <div className="builder-tab-frame">

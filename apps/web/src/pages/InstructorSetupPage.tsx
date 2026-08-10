@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Archive, ArrowLeft, Check, Play, RotateCcw, Settings2 } from 'lucide-react'
 import { AppMark } from '../components/AppMark'
@@ -25,6 +25,8 @@ function scenarioLabel(scenario: ScenarioView): string {
 export function InstructorSetupPage() {
   const navigate = useNavigate()
   const token = useAuthStore((state) => state.instructorToken)
+  const scenarioIdRef = useRef('')
+  const roomNameEdited = useRef(false)
   const [library, setLibrary] = useState<InstructorLibrary>({ scenarios: [], rooms: [] })
   const [scenarioId, setScenarioId] = useState('')
   const [roomChoice, setRoomChoice] = useState<'new' | string>('new')
@@ -45,16 +47,18 @@ export function InstructorSetupPage() {
     const result = await api<InstructorLibrary>('/api/instructor/library', { token })
     setLibrary(result)
     const active = result.scenarios.filter((scenario) => !scenario.archived)
-    const currentIsActive = active.some((scenario) => scenario.id === scenarioId)
+    const currentScenarioId = scenarioIdRef.current
+    const currentIsActive = active.some((scenario) => scenario.id === currentScenarioId)
     const next = currentIsActive
-      ? active.find((scenario) => scenario.id === scenarioId)
+      ? active.find((scenario) => scenario.id === currentScenarioId)
       : active.find((scenario) => scenario.id === WATERFRONT_SCENARIO_ID) ?? active[0]
-    if (next && next.id !== scenarioId) {
+    if (next && next.id !== currentScenarioId) {
+      scenarioIdRef.current = next.id
       setScenarioId(next.id)
-      setRoomName(`${next.title} Training Room`)
+      if (!roomNameEdited.current) setRoomName(`${next.title} Training Room`)
       setBenchmarkIds(next.benchmarks.map((benchmark) => benchmark.id))
     }
-  }, [scenarioId, token])
+  }, [token])
 
   useEffect(() => {
     void loadLibrary().catch((error) => setMessage(error instanceof Error ? error.message : 'Could not load instructor setup.'))
@@ -73,8 +77,10 @@ export function InstructorSetupPage() {
 
   function chooseScenario(nextId: string) {
     const scenario = activeScenarios.find((item) => item.id === nextId)
+    scenarioIdRef.current = nextId
     setScenarioId(nextId)
     if (scenario) {
+      roomNameEdited.current = false
       setRoomName(`${scenario.title} Training Room`)
       setBenchmarkIds(scenario.benchmarks.map((benchmark) => benchmark.id))
     }
@@ -141,7 +147,7 @@ export function InstructorSetupPage() {
       {view === 'setup' && <section className="quick-setup-panel" aria-label="Training room setup">
         <div className="quick-setup-primary">
           <div className="setup-step"><span className="setup-number">1</span><label><span className="field-label">Scenario</span><select aria-label="Scenario" className="field" value={scenarioId} onChange={(event) => chooseScenario(event.target.value)}>{activeScenarios.map((scenario) => <option key={scenario.id} value={scenario.id}>{scenarioLabel(scenario)}</option>)}</select></label><div className="inline-actions"><button type="button" className="btn btn-secondary" onClick={() => void navigate({ to: '/builder/new' })}>Create a custom scenario</button>{scenarioId && <button type="button" className="btn btn-ghost" onClick={() => void navigate({ to: '/builder/$scenarioId', params: { scenarioId } })}>Edit selected</button>}</div></div>
-          <div className="setup-step"><span className="setup-number">2</span><label><span className="field-label">Training room</span><select aria-label="Training room" className="field" value={roomChoice} onChange={(event) => chooseRoom(event.target.value)}><option value="new">Create a new room</option>{activeRooms.map((room) => <option key={room.id} value={room.id}>{room.name}{room.currentSession?.status === 'setup' ? ' — resume setup' : ''}</option>)}</select></label>{roomChoice === 'new' && <label><span className="field-label">New room name</span><input className="field" value={roomName} onChange={(event) => setRoomName(event.target.value)} maxLength={100}/></label>}<button type="button" className="btn btn-ghost justify-self-start" onClick={() => setView('rooms')}>Manage or restore rooms</button></div>
+          <div className="setup-step"><span className="setup-number">2</span><label><span className="field-label">Training room</span><select aria-label="Training room" className="field" value={roomChoice} onChange={(event) => chooseRoom(event.target.value)}><option value="new">Create a new room</option>{activeRooms.map((room) => <option key={room.id} value={room.id}>{room.name}{room.currentSession?.status === 'setup' ? ' — resume setup' : ''}</option>)}</select></label>{roomChoice === 'new' && <label><span className="field-label">New room name</span><input className="field" value={roomName} onChange={(event) => { roomNameEdited.current = true; setRoomName(event.target.value) }} maxLength={100}/></label>}<button type="button" className="btn btn-ghost justify-self-start" onClick={() => setView('rooms')}>Manage or restore rooms</button></div>
         </div>
         <div className="quick-setup-options">
           <label><span className="field-label">Participating units</span><input className="field" value={units} onChange={(event) => setUnits(event.target.value)}/></label>

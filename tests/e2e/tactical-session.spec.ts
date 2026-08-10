@@ -88,6 +88,21 @@ test('instructor setup creates a named room and opens its console', async ({ pag
   await expect(page.getByText(`Instructor · ${roomName}`)).toBeVisible()
 })
 
+test('late scenario loading never overwrites a room name the instructor already typed', async ({ page, request }) => {
+  const roomName = `Immediate Room Name ${Date.now()}`
+  const login = await request.post('/api/instructor/session', { data: { pin: '2300' } })
+  const instructorToken = (await login.json()).token as string
+  await page.addInitScript(({ token }) => { sessionStorage.setItem('mbfd-firesim-instructor-token', token) }, { token: instructorToken })
+  await page.route('**/api/instructor/library', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await route.continue()
+  })
+  await page.goto('/builder')
+  await page.getByLabel('New room name').fill(roomName)
+  await expect(page.getByLabel('Scenario')).toHaveValue('11111111-1111-4111-8111-111111111111')
+  await expect(page.getByLabel('New room name')).toHaveValue(roomName)
+})
+
 test('instructor can close and restore a training room without losing it', async ({ page, request }) => {
   const roomName = `Recoverable UI Room ${Date.now()}`
   const login = await request.post('/api/instructor/session', { data: { pin: '2300' } })
@@ -306,6 +321,7 @@ test('after-action review uses pagination instead of document or panel scrolling
 })
 
 test('two companies converge on Operations while Independent 300 remains isolated', async ({ browser, request }) => {
+  test.slow()
   const { instructorToken, room, session } = await createSession(request, 'independent')
   await startAndArrive(request, instructorToken, session.id, ['E1', 'E2', '300'])
   const first = await join(browser, room.id, 'Captain One', 'E1')
