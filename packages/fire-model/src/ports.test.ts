@@ -1,99 +1,99 @@
 import { describe, expect, it } from 'vitest'
-import type { ApparatusObject, Calibration, SceneObject } from '@mbfd/domain'
-import { apparatusSize, findPort, portsFor, portWorldPosition } from './ports.js'
+import { apparatusModels, type ApparatusObject, type Calibration, type SceneObject } from '@mbfd/domain'
+import { apparatusModelFor, apparatusSize, findPort, hitsObject, portsFor, portWorldPosition } from './ports.js'
 
-const calibration: Calibration = {
-  feetPerWorldUnit: 0.5,
-  a: { x: 0, y: 0 },
-  b: { x: 100, y: 0 },
-  distanceFt: 50,
-  reference: '',
-  calibratedAt: '2026-10-25T12:00:00.000Z',
+const calibration: Calibration = { feetPerWorldUnit: 0.5, a: { x: 0, y: 0 }, b: { x: 200, y: 0 }, distanceFt: 100, reference: '', calibratedAt: '2026-10-26T00:00:00.000Z' }
+
+function unit(templateId: ApparatusObject['templateId'], extra: Partial<ApparatusObject> = {}): ApparatusObject {
+  return { id: templateId, type: 'apparatus', templateId, label: templateId, assignment: '', x: 100, y: 100, rotation: 0, locked: false, ...extra }
 }
 
-function engine(overrides: Partial<ApparatusObject> = {}): ApparatusObject {
-  return { id: 'e1', type: 'apparatus', templateId: 'E1', label: 'E1', assignment: '', x: 0, y: 0, rotation: 0, locked: false, ...overrides }
-}
+describe('apparatus models', () => {
+  it('maps each unit to its MBFD model', () => {
+    expect(apparatusModelFor('E1').id).toBe('pierce-puc')
+    expect(apparatusModelFor('L1').id).toBe('pierce-ascendant')
+    expect(apparatusModelFor('L3').id).toBe('pierce-arrow-xt')
+    expect(apparatusModelFor('R2').id).toBe('horton-rescue')
+    expect(apparatusModelFor('L3', 'pierce-dash-2000').id).toBe('pierce-dash-2000')
+    expect(apparatusModelFor('L3', 'nonsense').id).toBe('pierce-arrow-xt')
+  })
+})
 
 describe('apparatusSize', () => {
-  it('uses the drawing default without calibration or a configured length', () => {
-    expect(apparatusSize('E1')).toEqual({ length: 74, width: 74 * (368 / 1402), toScale: false })
-    expect(apparatusSize('L1').length).toBe(104)
-  })
-
-  it('stays at the default when only one of calibration and length is present', () => {
-    expect(apparatusSize('E1', { calibration })).toMatchObject({ length: 74, toScale: false })
-    expect(apparatusSize('E1', { apparatusLengthFt: { E1: 40 } })).toMatchObject({ length: 74, toScale: false })
-    expect(apparatusSize('E1', { calibration, apparatusLengthFt: { E2: 40 } })).toMatchObject({ length: 74, toScale: false })
-  })
-
-  it('draws to scale when both calibration and a length are present', () => {
-    const size = apparatusSize('E1', { calibration, apparatusLengthFt: { E1: 40 } })
-    expect(size.length).toBe(80)
-    expect(size.width).toBeCloseTo(80 * (368 / 1402))
+  it('draws real length on a calibrated map', () => {
+    const size = apparatusSize('E1', { calibration })
     expect(size.toScale).toBe(true)
+    expect(size.length).toBeCloseTo(apparatusModels['pierce-puc'].lengthFt / 0.5, 6)
+    expect(size.unitsPerFt).toBe(2)
+    expect(size.width / size.length).toBeCloseTo(368 / 1402, 6)
   })
 
-  it('falls back to a generic size for unknown templates', () => {
-    expect(apparatusSize('Z9')).toEqual({ length: 74, width: 20, toScale: false })
+  it('uses an approximate scale on an uncalibrated map', () => {
+    const size = apparatusSize('L1', {})
+    expect(size.toScale).toBe(false)
+    expect(size.length).toBeCloseTo(43 * 2.25, 6)
+  })
+
+  it('follows a model override and legacy length overrides', () => {
+    expect(apparatusSize('L3', { calibration }, 'pierce-dash-2000').length).toBeCloseTo(92, 6)
+    expect(apparatusSize('E2', { calibration, apparatusLengthFt: { E2: 30 } }).length).toBeCloseTo(60, 6)
   })
 })
 
 describe('portsFor', () => {
-  it('gives engines a rear intake and two side discharges', () => {
-    const ports = portsFor(engine())
-    expect(ports.map((port) => [port.id, port.size, port.direction])).toEqual([
-      ['intake', 'storz-5', 'inlet'],
-      ['discharge-2.5', 'nh-2.5', 'outlet'],
-      ['discharge-1.5', 'nh-1.5', 'outlet'],
-    ])
-    expect(ports[0]).toMatchObject({ x: 0, y: 35 })
+  it('puts the engine intake on the driver side, 13 ft back from the front bumper', () => {
+    const engine = unit('E1')
+    const size = apparatusSize('E1', { calibration })
+    const intake = findPort(engine, 'intake', { calibration })!
+    expect(intake).toMatchObject({ size: 'storz-5', direction: 'inlet' })
+    expect(intake.x).toBeCloseTo(-size.width / 2, 6)
+    expect(intake.y).toBeCloseTo(-size.length / 2 + 13 * 2, 6)
+    expect(portsFor(engine, { calibration }).map((port) => port.id)).toEqual(['intake', 'discharge-1.5', 'discharge-1.5b', 'discharge-2.5'])
   })
 
-  it('gives aerials an intake and a single 1½″ discharge', () => {
-    const ports = portsFor(engine({ templateId: 'L1', label: 'L1' }))
-    expect(ports.map((port) => port.id)).toEqual(['intake', 'discharge-1.5'])
-    expect(ports[0]?.y).toBe(50)
+  it('uses each aerial model\'s intake position', () => {
+    const ascendant = findPort(unit('L1'), 'intake', { calibration })!
+    const arrow = findPort(unit('L3'), 'intake', { calibration })!
+    expect(ascendant.y).toBeCloseTo(-43 + 17 * 2, 6)
+    expect(arrow.y).toBeCloseTo(-(42 + 2 / 12) + 16 * 2, 6)
   })
 
-  it('moves ports with the to-scale length', () => {
-    const intake = findPort(engine(), 'intake', { calibration, apparatusLengthFt: { E1: 40 } })
-    expect(intake?.y).toBe(38)
+  it('gives rescues no ports', () => {
+    expect(portsFor(unit('R1'), { calibration })).toEqual([])
   })
 
-  it('describes hydrant, wye, and nozzle ports', () => {
+  it('places hydrant, wye, and nozzle ports', () => {
     const hydrant: SceneObject = { id: 'h', type: 'hydrant', label: 'H1', status: 'available', notes: '', x: 0, y: 0, rotation: 0, locked: false }
     const wye: SceneObject = { id: 'w', type: 'appliance', applianceType: 'gated-wye', x: 0, y: 0, rotation: 0, locked: false }
     const nozzle: SceneObject = { id: 'n', type: 'nozzle', nozzleType: 'fog', x: 0, y: 0, rotation: 0, locked: false }
-    expect(portsFor(hydrant).map((port) => [port.id, port.direction])).toEqual([['storz', 'outlet']])
-    expect(portsFor(wye).map((port) => [port.id, port.size, port.direction])).toEqual([
-      ['inlet', 'nh-2.5', 'inlet'],
-      ['outlet-a', 'nh-1.5', 'outlet'],
-      ['outlet-b', 'nh-1.5', 'outlet'],
-    ])
-    expect(portsFor(nozzle).map((port) => [port.id, port.size, port.direction])).toEqual([['inlet', 'nh-1.5', 'inlet']])
-  })
-
-  it('gives notes, markers, and paths no ports', () => {
-    expect(portsFor({ id: 'n', type: 'note', text: 'x', x: 0, y: 0, rotation: 0, locked: false })).toEqual([])
-    expect(portsFor({ id: 'a', type: 'arrow', points: [0, 0, 1, 1], color: 'white', label: '', locked: false })).toEqual([])
+    expect(portsFor(hydrant).map((port) => port.id)).toEqual(['storz'])
+    expect(portsFor(wye).map((port) => port.id)).toEqual(['inlet', 'outlet-a', 'outlet-b'])
+    expect(portsFor(nozzle).map((port) => port.id)).toEqual(['inlet'])
+    expect(portsFor({ id: 'm', type: 'marker', markerType: 'fire', label: '', x: 0, y: 0, rotation: 0, locked: false })).toEqual([])
   })
 })
 
-describe('portWorldPosition and findPort', () => {
+describe('portWorldPosition and hitsObject', () => {
   it('rotates ports with the object', () => {
-    const rotated = engine({ x: 100, y: 100, rotation: 180 })
-    const position = portWorldPosition(rotated, findPort(rotated, 'intake')!)
-    expect(position.x).toBeCloseTo(100)
-    expect(position.y).toBeCloseTo(65)
+    const engine = unit('E1', { rotation: 90 })
+    const intake = findPort(engine, 'intake', { calibration })!
+    const world = portWorldPosition(engine, intake)
+    expect(world.x).toBeCloseTo(100 - intake.y, 6)
+    expect(world.y).toBeCloseTo(100 + intake.x, 6)
   })
 
-  it('returns the local offset for objects without a position', () => {
-    const arrow: SceneObject = { id: 'a', type: 'arrow', points: [0, 0, 1, 1], color: 'white', label: '', locked: false }
-    expect(portWorldPosition(arrow, { id: 'p', label: 'p', size: 'nh-1.5', direction: 'inlet', x: 3, y: 4 })).toEqual({ x: 3, y: 4 })
+  it('hits a rotated vehicle body with a margin', () => {
+    const engine = unit('E1', { rotation: 90 })
+    const size = apparatusSize('E1', { calibration })
+    expect(hitsObject(engine, { x: 100 + size.length / 2 - 1, y: 100 }, { calibration }, 0)).toBe(true)
+    expect(hitsObject(engine, { x: 100, y: 100 + size.length / 2 - 1 }, { calibration }, 0)).toBe(false)
+    expect(hitsObject(engine, { x: 100, y: 100 + size.width / 2 + 3 }, { calibration }, 5)).toBe(true)
   })
 
-  it('returns undefined for an unknown port id', () => {
-    expect(findPort(engine(), 'nope')).toBeUndefined()
+  it('hits round objects within their radius plus margin', () => {
+    const hydrant: SceneObject = { id: 'h', type: 'hydrant', label: 'H1', status: 'available', notes: '', x: 0, y: 0, rotation: 0, locked: false }
+    expect(hitsObject(hydrant, { x: 15, y: 0 }, {}, 2)).toBe(true)
+    expect(hitsObject(hydrant, { x: 30, y: 0 }, {}, 2)).toBe(false)
+    expect(hitsObject({ id: 'n', type: 'note', text: 'x', x: 0, y: 0, rotation: 0, locked: false }, { x: 0, y: 0 }, {}, 10)).toBe(false)
   })
 })

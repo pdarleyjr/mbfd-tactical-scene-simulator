@@ -32,15 +32,15 @@ import { ArrowNode, HydrantNode, MarkerNode, MeasurementNode, NoteNode, NozzleNo
 import { PathHandles, RadiusHandle } from './overlays/EditHandles'
 import { DraftOverlay } from './overlays/DraftOverlay'
 
-Konva.dragDistance = 4
+Konva.dragDistance = 5
 Konva.hitOnDragEnabled = false
 
 for (const template of apparatusCatalog) preloadImage(template.assetPath)
 
 type Gesture =
-  | { kind: 'pan'; start: Vec; view: ViewportTransform; moved: boolean; world: Vec; tap: 'deselect' | 'place' | 'draft' | 'none' }
+  | { kind: 'pan'; start: Vec; view: ViewportTransform; moved: boolean; world: Vec; tap: 'deselect' | 'place' | 'draft' | 'none'; locked?: boolean }
   | { kind: 'stroke'; start: Vec; world: Vec; points: number[]; moved: boolean; last: Vec }
-  | { kind: 'marquee'; start: Vec; current: Vec }
+  | { kind: 'marquee'; start: Vec; current: Vec; local: Vec; moved: boolean }
   | { kind: 'pinch'; last: { distance: number; center: Vec } }
   | { kind: 'idle' }
 
@@ -103,7 +103,10 @@ export function SceneStage() {
   // Per-object readings cached by identity so memoized nodes skip unchanged objects.
   const sizeFor = useMemo(() => {
     const cache = new Map<string, ApparatusSize>()
-    return (templateId: string) => cache.get(templateId) ?? cache.set(templateId, apparatusSize(templateId, context)).get(templateId)!
+    return (templateId: string, modelId?: string) => {
+      const key = `${templateId}:${modelId ?? ''}`
+      return cache.get(key) ?? cache.set(key, apparatusSize(templateId, context, modelId)).get(key)!
+    }
   }, [context])
   const hoseReading = useMemo(() => {
     const cache = new WeakMap<SceneObject, HoseReading>()
@@ -218,7 +221,7 @@ export function SceneStage() {
       const local = clientToLocal(event.clientX, event.clientY)
       if (!local) return
       const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
-      useUi.getState().setView((current) => zoomAroundPoint(current, local, current.scale * Math.exp(-delta * (event.ctrlKey ? 0.01 : 0.0018))))
+      useUi.getState().setView((current) => zoomAroundPoint(current, local, current.scale * Math.exp(-delta * (event.ctrlKey ? 0.006 : 0.0011))))
     }
     host.addEventListener('wheel', onWheel, { passive: false })
     return () => host.removeEventListener('wheel', onWheel)
@@ -359,7 +362,6 @@ export function SceneStage() {
   }
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button === 2) return
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     const host = hostRef.current
     if (pointers.current.size >= 2) {
@@ -377,7 +379,8 @@ export function SceneStage() {
     if (!local || !stage) return
     const currentView = useUi.getState().view
     const worldPoint = screenToWorld(local, currentView)
-    const panRequested = spaceDown || event.button === 1
+    // The map only moves when asked to: right or middle drag, Space + drag, or two fingers.
+    const panRequested = spaceDown || event.button === 1 || event.button === 2
     if (!panRequested && interactive) {
       const hit = stage.getIntersection(local)
       if (hit) { gesture.current = { kind: 'idle' }; return }
@@ -385,11 +388,10 @@ export function SceneStage() {
     try { host?.setPointerCapture(event.pointerId) } catch { /* synthetic or already-released pointer */ }
     if (panRequested) gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'none' }
     else if (reviewing) gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'none' }
-    else if (tool === 'select' && event.shiftKey) gesture.current = { kind: 'marquee', start: worldPoint, current: worldPoint }
-    else if (tool === 'select') gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'deselect' }
+    else if (tool === 'select') gesture.current = { kind: 'marquee', start: worldPoint, current: worldPoint, local, moved: false }
     else if (tool === 'hose' || tool === 'arrow') gesture.current = { kind: 'stroke', start: local, world: worldPoint, points: [worldPoint.x, worldPoint.y], moved: false, last: local }
-    else if (tool === 'measure' || tool === 'calibrate') gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'draft' }
-    else gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'place' }
+    else if (tool === 'measure' || tool === 'calibrate') gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'draft', locked: true }
+    else gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'place', locked: true }
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
@@ -410,6 +412,7 @@ export function SceneStage() {
       const dy = local.y - active.start.y
       if (!active.moved && Math.hypot(dx, dy) < 6) return
       active.moved = true
+      if (active.locked) return
       useUi.getState().setView({ ...active.view, x: active.view.x + dx, y: active.view.y + dy })
     } else if (active.kind === 'stroke') {
       if (!active.moved && Math.hypot(local.x - active.start.x, local.y - active.start.y) < 7) return
@@ -421,6 +424,8 @@ export function SceneStage() {
       strokePreview.current = [...active.points]
       setStrokeVersion((value) => value + 1)
     } else if (active.kind === 'marquee') {
+      if (!active.moved && Math.hypot(local.x - active.local.x, local.y - active.local.y) < 6) return
+      active.moved = true
       active.current = worldPoint
       setMarquee({ a: active.start, b: worldPoint })
     }
@@ -446,6 +451,7 @@ export function SceneStage() {
       else draftTap(active.world)
     } else if (active.kind === 'marquee') {
       setMarquee(null)
+      if (!active.moved) { if (!event.shiftKey) useUi.getState().select([]); return }
       const minX = Math.min(active.start.x, active.current.x)
       const maxX = Math.max(active.start.x, active.current.x)
       const minY = Math.min(active.start.y, active.current.y)
@@ -524,7 +530,7 @@ export function SceneStage() {
           <InteractionContext.Provider value={interaction}>
             <Layer listening={interactive}>
               {apparatus.map((object) => object.type === 'apparatus' && (
-                <ApparatusNode key={object.id} object={object} size={sizeFor(object.templateId)} selected={selected.has(object.id)} inv={roundedInv} />
+                <ApparatusNode key={object.id} object={object} size={sizeFor(object.templateId, object.modelId)} selected={selected.has(object.id)} inv={roundedInv} />
               ))}
             </Layer>
             <FlowContext.Provider value={flowRegistry}>
@@ -565,7 +571,7 @@ export function SceneStage() {
                 if (object.type !== 'apparatus') return null
                 const unit = supply.apparatus.get(object.id)
                 const state = unit?.supplied ? 'hydrant' : unit?.outputLineIds.length ? 'tank' : 'none'
-                return <ApparatusLabel key={object.id} object={object} size={sizeFor(object.templateId)} inv={roundedInv} scale={labelScale} supply={state} />
+                return <ApparatusLabel key={object.id} object={object} size={sizeFor(object.templateId, object.modelId)} inv={roundedInv} scale={labelScale} supply={state} />
               })}
             </Layer>
           )}
@@ -633,7 +639,7 @@ function CompareGhost({ objects, inv, context }: { objects: SceneObject[]; inv: 
       {objects.map((object) => {
         if (object.type === 'hose') return <Line key={object.id} points={object.points} stroke="#69d3e7" strokeWidth={4} dash={[12, 7]} lineCap="round" lineJoin="round" strokeScaleEnabled={false} />
         if (object.type === 'apparatus') {
-          const size = apparatusSize(object.templateId, context)
+          const size = apparatusSize(object.templateId, context, object.modelId)
           return (
             <Group key={object.id} x={object.x} y={object.y} rotation={object.rotation}>
               <Rect x={-size.width / 2} y={-size.length / 2} width={size.width} height={size.length} stroke="#69d3e7" strokeWidth={2.5} dash={[8, 5]} strokeScaleEnabled={false} cornerRadius={3 * inv} />

@@ -1,5 +1,6 @@
 import Konva from 'konva'
-import { useBoard } from './store/board'
+import { findPort, portWorldPosition } from '@mbfd/fire-model'
+import { sceneContext, useBoard } from './store/board'
 import { useUi } from './store/ui'
 import { canvasApi } from './canvas/api'
 import { worldToScreen } from './canvas/viewport'
@@ -22,6 +23,13 @@ export function installTestHook() {
         return { x: host.left + point.x, y: host.top + point.y }
       },
       fit: () => canvasApi.current?.fit(),
+      /** World position of an object's connection point. */
+      portAt: (objectId: string, portId: string) => {
+        const board = useBoard.getState().board
+        const object = board.objects.find((candidate) => candidate.id === objectId)
+        const port = object ? findPort(object, portId, sceneContext(board.scenario)) : undefined
+        return object && port ? portWorldPosition(object, port) : null
+      },
       /** Rendered canvas nodes by name, e.g. 'apparatus' or 'hose'. */
       rendered: (name: string) => Konva.stages[0]?.find(`.${name}`).length ?? 0,
     },

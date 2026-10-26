@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apparatusCatalog, defaultHoseLoads, findApparatusTemplate, findMarker } from './catalog.js'
+import { apparatusCatalog, apparatusModels, defaultHoseLoads, legacyHoseLoads, findApparatusTemplate, findMarker } from './catalog.js'
 import {
   SCENE_SCHEMA_VERSION,
   boardSchema,
@@ -7,6 +7,7 @@ import {
   isPathObject,
   isPlacedObject,
   repairBoard,
+  upgradeBoard,
   salvageObjects,
   sceneObjectSchema,
   type SceneObject,
@@ -163,7 +164,7 @@ describe('catalog lookups', () => {
     expect(findApparatusTemplate('nope')).toBeUndefined()
     expect(findMarker('collapse-zone')?.area).toBe(true)
     expect(findMarker('nope')).toBeUndefined()
-    expect(apparatusCatalog.every((template) => template.verifiedLengthFt === null)).toBe(true)
+    expect(apparatusCatalog.every((template) => apparatusModels[template.model].lengthFt > 20)).toBe(true)
   })
 })
 
@@ -213,5 +214,23 @@ describe('repairBoard', () => {
   it('returns undefined for non-objects', () => {
     expect(repairBoard(42, fallback)).toBeUndefined()
     expect(repairBoard(null, fallback)).toBeUndefined()
+  })
+})
+
+describe('upgradeBoard', () => {
+  const calibration = { feetPerWorldUnit: 0.58, a: { x: 0, y: 0 }, b: { x: 1, y: 0 }, distanceFt: 78, reference: 'court', calibratedAt: '2026-10-26T00:00:00.000Z' }
+  const legacy = () => boardSchema.parse(minimalBoard({ scenario: { title: 'Scenario', background: { kind: 'builtin', url: '/seed.webp' }, world: { width: 10, height: 10 }, hoseLoads: legacyHoseLoads } }))
+
+  it('moves untouched V2 hose loads to the MBFD loads and adds the template scale', () => {
+    const { board, changed } = upgradeBoard(legacy(), { calibration, templateBackground: '/seed.webp' })
+    expect(changed).toBe(true)
+    expect(board.scenario.hoseLoads).toEqual(defaultHoseLoads)
+    expect(board.scenario.calibration).toEqual(calibration)
+  })
+
+  it('keeps operator-changed loads, existing calibration, and custom maps', () => {
+    const custom = legacy()
+    const changedLoads = { ...custom, scenario: { ...custom.scenario, hoseLoads: { ...defaultHoseLoads, sectionLengthFt: { ...defaultHoseLoads.sectionLengthFt, hose3: 60 } } } }
+    expect(upgradeBoard(changedLoads, { calibration, templateBackground: '/other.webp' })).toEqual({ board: changedLoads, changed: false })
   })
 })

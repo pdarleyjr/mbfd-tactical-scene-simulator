@@ -34,6 +34,8 @@ export const ApparatusNode = memo(function ApparatusNode({ object, size, selecte
       onDragMove={(event) => interaction.dragMove(object.id, event)}
       onDragEnd={(event) => interaction.dragEnd(object.id, event)}
     >
+      {/* Invisible grab area: at least ~36 px across on screen, so a truck is easy to pick up. */}
+      <Rect x={-Math.max(width, 36 * inv) / 2} y={-Math.max(length, 36 * inv) / 2} width={Math.max(width, 36 * inv)} height={Math.max(length, 36 * inv)} fill="rgba(0,0,0,0.001)" />
       <Rect x={-width / 2 + 1.2} y={-length / 2 + 2.4} width={width} height={length} cornerRadius={width * 0.16} fill="rgba(0,0,0,0.38)" listening={false} />
       {image
         ? <Image image={image} x={-width / 2} y={-length / 2} width={width} height={length} perfectDrawEnabled={false} />
