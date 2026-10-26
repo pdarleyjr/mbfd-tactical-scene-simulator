@@ -1,3 +1,2 @@
-// Tailwind CSS v4 is integrated through @tailwindcss/vite. Keeping this local
-// config prevents Vite from inheriting an unrelated parent-repository config.
+// Local config so Vite never inherits an unrelated parent-directory PostCSS config.
 export default { plugins: {} }

@@ -1,0 +1,139 @@
+import { describe, expect, it } from 'vitest'
+import { sceneObjectSchema, type ApparatusObject, type HoseObject, type HydrantObject, type SceneObject } from '@mbfd/domain'
+import {
+  createApparatus,
+  createHydrant,
+  createMarker,
+  createNote,
+  createNozzle,
+  createWye,
+  duplicateObjects,
+  newId,
+  nextApparatusLabel,
+  nextHydrantLabel,
+  translateObject,
+} from './factories.js'
+
+function apparatus(id: string, label: string, templateId: ApparatusObject['templateId'] = 'E1'): ApparatusObject {
+  return { id, type: 'apparatus', templateId, label, assignment: '', x: 0, y: 0, rotation: 0, locked: false }
+}
+
+function hydrant(id: string, label: string): HydrantObject {
+  return { id, type: 'hydrant', label, status: 'available', notes: '', x: 10, y: 10, rotation: 0, locked: false }
+}
+
+describe('nextApparatusLabel', () => {
+  it('follows the sequence E1, E1-2, E1-3', () => {
+    expect(nextApparatusLabel('E1', [])).toBe('E1')
+    expect(nextApparatusLabel('E1', [apparatus('a', 'E1')])).toBe('E1-2')
+    expect(nextApparatusLabel('E1', [apparatus('a', 'E1'), apparatus('b', 'E1-2')])).toBe('E1-3')
+  })
+
+  it('fills gaps and compares labels case-insensitively', () => {
+    expect(nextApparatusLabel('E1', [apparatus('a', 'e1'), apparatus('b', 'E1-3')])).toBe('E1-2')
+  })
+
+  it('only counts apparatus labels', () => {
+    expect(nextApparatusLabel('E1', [hydrant('h', 'E1')])).toBe('E1')
+    expect(nextApparatusLabel('L1', [apparatus('a', 'E1')])).toBe('L1')
+  })
+})
+
+describe('nextHydrantLabel', () => {
+  it('returns the first unused H number', () => {
+    expect(nextHydrantLabel([])).toBe('H1')
+    expect(nextHydrantLabel([hydrant('a', 'H1'), hydrant('b', 'h3')])).toBe('H2')
+    expect(nextHydrantLabel([hydrant('a', 'H1'), hydrant('b', 'H2')])).toBe('H3')
+  })
+})
+
+describe('object factories', () => {
+  it('creates valid objects with fresh ids', () => {
+    const created: SceneObject[] = [
+      createApparatus('E2', { x: 1, y: 2 }, 90, []),
+      createHydrant({ x: 3, y: 4 }, []),
+      createMarker('victim', { x: 5, y: 6 }),
+      createNote({ x: 7, y: 8 }),
+      createWye({ x: 9, y: 10 }, 45),
+      createNozzle({ x: 11, y: 12 }, 0),
+    ]
+    for (const object of created) expect(sceneObjectSchema.safeParse(object).success).toBe(true)
+    expect(new Set(created.map((object) => object.id)).size).toBe(created.length)
+    expect(newId()).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('labels new apparatus and hydrants against the existing scene', () => {
+    expect(createApparatus('E1', { x: 0, y: 0 }, 0, [apparatus('a', 'E1')])).toMatchObject({ label: 'E1-2', templateId: 'E1', rotation: 0 })
+    expect(createHydrant({ x: 0, y: 0 }, [hydrant('h', 'H1')])).toMatchObject({ label: 'H2', status: 'unknown' })
+  })
+
+  it('rejects unknown apparatus templates', () => {
+    expect(() => createApparatus('Z9', { x: 0, y: 0 }, 0, [])).toThrow('Unknown apparatus Z9')
+  })
+
+  it('gives area markers a radius and point markers none', () => {
+    expect(createMarker('collapse-zone', { x: 0, y: 0 }).radius).toBe(90)
+    expect(createMarker('victim', { x: 0, y: 0 })).not.toHaveProperty('radius')
+  })
+
+  it('applies defaults for notes and nozzles', () => {
+    expect(createNote({ x: 0, y: 0 }).text).toBe('Note')
+    expect(createNote({ x: 0, y: 0 }, 'RIT staged').text).toBe('RIT staged')
+    expect(createNozzle({ x: 0, y: 0 }, 0).nozzleType).toBe('fog')
+    expect(createNozzle({ x: 0, y: 0 }, 0, 'smooth-bore').nozzleType).toBe('smooth-bore')
+    expect(createWye({ x: 0, y: 0 }, 30)).toMatchObject({ applianceType: 'gated-wye', rotation: 30 })
+  })
+})
+
+describe('translateObject', () => {
+  it('moves placed objects by their position', () => {
+    const original = hydrant('h', 'H1')
+    const moved = translateObject(original, 5, -5)
+    expect(moved).toEqual({ ...original, x: 15, y: 5 })
+    expect(original.x).toBe(10)
+  })
+
+  it('moves path objects by their points', () => {
+    const arrow: SceneObject = { id: 'a', type: 'arrow', points: [0, 0, 10, 10], color: 'red', label: '', locked: false }
+    expect(translateObject(arrow, 1, 2)).toEqual({ ...arrow, points: [1, 2, 11, 12] })
+  })
+})
+
+describe('duplicateObjects', () => {
+  const h1 = hydrant('h1', 'H1')
+  const e1 = apparatus('e1', 'E1')
+  const n1: SceneObject = { id: 'n1', type: 'nozzle', nozzleType: 'fog', x: 0, y: 0, rotation: 0, locked: false }
+  const supply: HoseObject = { id: 's1', type: 'hose', hoseType: 'supply5', purpose: 'supply', points: [10, 10, 0, 0], from: { objectId: 'h1', portId: 'storz' }, to: { objectId: 'e1', portId: 'intake' }, label: '', locked: false }
+  const attack: HoseObject = { id: 'a1', type: 'hose', hoseType: 'attack175', purpose: 'attack', points: [0, 0, 50, 50], from: { objectId: 'e1', portId: 'discharge-1.5' }, to: { objectId: 'n1', portId: 'inlet' }, label: '', locked: false }
+  const all = [h1, e1, n1, supply, attack]
+
+  it('copies with new ids, offsets, and fresh labels', () => {
+    const copies = duplicateObjects([h1, e1], all)
+    expect(copies).toHaveLength(2)
+    expect(copies.map((copy) => copy.id)).not.toContain('h1')
+    expect(copies[0]).toMatchObject({ type: 'hydrant', label: 'H2', x: 34, y: 34 })
+    expect(copies[1]).toMatchObject({ type: 'apparatus', label: 'E1-2', x: 24, y: 24 })
+  })
+
+  it('keeps hose connections inside the copied set and drops external ones', () => {
+    const [hCopy, eCopy, sCopy, aCopy] = duplicateObjects([h1, e1, supply, attack], all, { x: 0, y: 100 })
+    const copiedSupply = sCopy as HoseObject
+    const copiedAttack = aCopy as HoseObject
+    expect(copiedSupply.from).toEqual({ objectId: hCopy!.id, portId: 'storz' })
+    expect(copiedSupply.to).toEqual({ objectId: eCopy!.id, portId: 'intake' })
+    expect(copiedSupply.points).toEqual([10, 110, 0, 100])
+    expect(copiedAttack.from).toEqual({ objectId: eCopy!.id, portId: 'discharge-1.5' })
+    expect(copiedAttack).not.toHaveProperty('to')
+  })
+
+  it('releases both ends of a hose copied on its own', () => {
+    const [copy] = duplicateObjects([supply], all)
+    expect(copy).not.toHaveProperty('from')
+    expect(copy).not.toHaveProperty('to')
+  })
+
+  it('numbers several copies of the same apparatus in sequence', () => {
+    const copies = duplicateObjects([e1, apparatus('e1b', 'E1-2')], [e1, apparatus('e1b', 'E1-2')])
+    expect(copies.map((copy) => (copy as ApparatusObject).label)).toEqual(['E1-3', 'E1-4'])
+  })
+})

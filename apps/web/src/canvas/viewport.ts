@@ -7,18 +7,21 @@ export interface ViewportTransform extends Point {
   scale: number
 }
 
+export const ZOOM_LIMITS = { min: 0.1, max: 10 }
+
 export function fitWorldToViewport(
   world: { width: number; height: number },
   viewport: { width: number; height: number },
-  padding = 0,
+  padding: number | { top: number; right: number; bottom: number; left: number } = 0,
 ): ViewportTransform {
-  const usableWidth = Math.max(1, viewport.width - padding * 2)
-  const usableHeight = Math.max(1, viewport.height - padding * 2)
+  const pad = typeof padding === 'number' ? { top: padding, right: padding, bottom: padding, left: padding } : padding
+  const usableWidth = Math.max(1, viewport.width - pad.left - pad.right)
+  const usableHeight = Math.max(1, viewport.height - pad.top - pad.bottom)
   const scale = Math.min(usableWidth / world.width, usableHeight / world.height)
   return {
     scale,
-    x: (viewport.width - world.width * scale) / 2,
-    y: (viewport.height - world.height * scale) / 2,
+    x: pad.left + (usableWidth - world.width * scale) / 2,
+    y: pad.top + (usableHeight - world.height * scale) / 2,
   }
 }
 
@@ -40,7 +43,7 @@ export function zoomAroundPoint(
   viewport: ViewportTransform,
   anchor: Point,
   nextScale: number,
-  limits = { min: 0.15, max: 6 },
+  limits = ZOOM_LIMITS,
 ): ViewportTransform {
   const scale = Math.min(limits.max, Math.max(limits.min, nextScale))
   const worldAnchor = screenToWorld(anchor, viewport)
@@ -55,7 +58,7 @@ export function pinchViewport(
   viewport: ViewportTransform,
   previous: { distance: number; center: Point },
   next: { distance: number; center: Point },
-  limits = { min: 0.15, max: 6 },
+  limits = ZOOM_LIMITS,
 ): ViewportTransform {
   if (previous.distance <= 0 || next.distance <= 0) return viewport
   const scale = Math.min(limits.max, Math.max(limits.min, viewport.scale * next.distance / previous.distance))
@@ -65,4 +68,13 @@ export function pinchViewport(
     x: next.center.x - worldAnchor.x * scale,
     y: next.center.y - worldAnchor.y * scale,
   }
+}
+
+/** Keeps the same world point at the center when the host element resizes. */
+export function preserveCenterOnResize(
+  viewport: ViewportTransform,
+  previous: { width: number; height: number },
+  next: { width: number; height: number },
+): ViewportTransform {
+  return { ...viewport, x: viewport.x + (next.width - previous.width) / 2, y: viewport.y + (next.height - previous.height) / 2 }
 }

@@ -1,6 +1,6 @@
 {
   "name": "mbfd-tactical-scene-simulator",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.20.0",
@@ -8,16 +8,14 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter @mbfd/server --filter @mbfd/web dev",
-    "dev:e2e": "pnpm --parallel --filter @mbfd/server --filter @mbfd/web dev:e2e",
-    "build": "pnpm -r --if-present build",
+    "dev": "pnpm --filter @mbfd/web dev",
+    "dev:e2e": "pnpm --filter @mbfd/web dev:e2e",
+    "build": "pnpm --filter @mbfd/web build",
     "typecheck": "tsc -b --pretty false",
     "lint": "oxlint apps packages",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "db:generate": "pnpm --filter @mbfd/server db:generate",
-    "db:migrate": "pnpm --filter @mbfd/server db:migrate"
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

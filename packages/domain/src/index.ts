@@ -1,2 +1,3 @@
 export * from './catalog.js'
-export * from './schema.js'
+export * from './scene.js'
+export * from './legacy.js'

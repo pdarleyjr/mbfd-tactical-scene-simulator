@@ -7,12 +7,14 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: [
-        'packages/collaboration/src/authorization.ts',
-        'packages/collaboration/src/documents.ts',
+        'packages/domain/src/*.ts',
         'packages/fire-model/src/*.ts',
         'apps/web/src/canvas/viewport.ts',
-        'apps/web/src/scene/actions.ts',
-        'apps/server/src/security/tokens.ts',
+        'apps/web/src/store/board.ts',
+        'apps/web/src/lib/storage.ts',
+        'apps/web/src/lib/scene-files.ts',
+        'apps/web/src/lib/format.ts',
+        'apps/web/src/lib/debrief.ts',
       ],
       thresholds: {
         branches: 80,
