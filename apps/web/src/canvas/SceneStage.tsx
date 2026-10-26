@@ -90,6 +90,7 @@ export function SceneStage() {
   const layers = useUi((state) => state.layers)
   const presenting = useUi((state) => state.presenting)
   const reviewing = useUi((state) => state.reviewing)
+  const display = useUi((state) => state.display)
   const reviewAtMs = useUi((state) => state.reviewAtMs)
   const compareSnapshotId = useUi((state) => state.compareSnapshotId)
   const backgroundUrl = useMediaUrl(board.scenario.background)
@@ -116,7 +117,7 @@ export function SceneStage() {
     const cache = new WeakMap<SceneObject, LengthReading>()
     return (object: MeasurementObject) => cache.get(object) ?? cache.set(object, readLength(polylineLength(object.points), scenario.calibration)).get(object)!
   }, [scenario.calibration])
-  const interactive = tool === 'select' && !reviewing && !spaceDown
+  const interactive = tool === 'select' && !reviewing && !display && !spaceDown
   const inv = 1 / view.scale
   const roundedInv = Math.round(inv * 1000) / 1000
   // Matches the CSS chrome zoom on very large displays running at 100% scaling.
@@ -387,7 +388,7 @@ export function SceneStage() {
     }
     try { host?.setPointerCapture(event.pointerId) } catch { /* synthetic or already-released pointer */ }
     if (panRequested) gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'none' }
-    else if (reviewing) gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'none' }
+    else if (reviewing || display) gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'none' }
     else if (tool === 'select') gesture.current = { kind: 'marquee', start: worldPoint, current: worldPoint, local, moved: false }
     else if (tool === 'hose' || tool === 'arrow') gesture.current = { kind: 'stroke', start: local, world: worldPoint, points: [worldPoint.x, worldPoint.y], moved: false, last: local }
     else if (tool === 'measure' || tool === 'calibrate') gesture.current = { kind: 'pan', start: local, view: currentView, moved: false, world: worldPoint, tap: 'draft', locked: true }

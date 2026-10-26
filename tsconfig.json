@@ -3,6 +3,7 @@
   "references": [
     { "path": "./packages/domain" },
     { "path": "./packages/fire-model" },
-    { "path": "./apps/web" }
+    { "path": "./apps/web" },
+    { "path": "./apps/sync" }
   ]
 }

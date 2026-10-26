@@ -3,6 +3,7 @@ import { SceneStage } from './canvas/SceneStage'
 import { useBoard } from './store/board'
 import { useUi } from './store/ui'
 import { bootWorkspace } from './lib/workspace'
+import { useLive } from './lib/live'
 import { useShortcuts } from './hooks/useShortcuts'
 import { useInjectSchedule } from './hooks/useInjectSchedule'
 import { TopBar } from './ui/TopBar'
@@ -24,18 +25,20 @@ export function App() {
   const presenting = useUi((state) => state.presenting)
   const reviewing = useUi((state) => state.reviewing)
   const dialog = useUi((state) => state.dialog)
+  const display = useUi((state) => state.display)
+  const connection = useLive((state) => state.connection)
   useShortcuts()
   useInjectSchedule()
   useEffect(() => {
     bootWorkspace().catch((error: unknown) => {
       console.error('Startup failed', error)
       useBoard.setState({ hydrated: true })
-      useUi.getState().toast('Saved scenes could not be opened, so the original scenario is shown. Changes may not be kept.', 'error')
+      useUi.getState().toast('The scene could not be opened, so the original scenario is shown. Changes may not be kept.', 'error')
     })
   }, [])
 
   return (
-    <div className="app" data-presenting={presenting || undefined} data-reviewing={reviewing || undefined} data-ready={hydrated || undefined}>
+    <div className="app" data-presenting={presenting || undefined} data-reviewing={reviewing || undefined} data-ready={hydrated || undefined} data-display={display || undefined} data-live={connection}>
       <SceneStage />
       {!presenting && <TopBar />}
       {!presenting && !reviewing && <ToolDock />}

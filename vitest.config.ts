@@ -15,6 +15,9 @@ export default defineConfig({
         'apps/web/src/lib/scene-files.ts',
         'apps/web/src/lib/format.ts',
         'apps/web/src/lib/debrief.ts',
+        'apps/sync/src/files.ts',
+        'apps/sync/src/rooms.ts',
+        'apps/sync/src/server.ts',
       ],
       thresholds: {
         branches: 80,

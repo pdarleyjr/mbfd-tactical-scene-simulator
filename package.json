@@ -8,9 +8,9 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "dev": "pnpm --filter @mbfd/web dev",
-    "dev:e2e": "pnpm --filter @mbfd/web dev:e2e",
-    "build": "pnpm --filter @mbfd/web build",
+    "dev": "pnpm --parallel --filter @mbfd/web --filter @mbfd/sync dev",
+    "dev:e2e": "pnpm --parallel --filter @mbfd/web --filter @mbfd/sync dev:e2e",
+    "build": "pnpm --filter @mbfd/web --filter @mbfd/sync build",
     "typecheck": "tsc -b --pretty false",
     "lint": "oxlint apps packages",
     "test": "vitest run",

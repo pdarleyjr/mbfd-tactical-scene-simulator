@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { Board, Scenario, SceneObject, Snapshot, TimelineEntry, TimerState, Training } from '@mbfd/domain'
-import { diffObjects, isEmptyDiff, reconcileHoses, type SceneContext } from '@mbfd/fire-model'
+import { applyScenePatch, type Board, type Scenario, type ScenePatch, type SceneObject, type Snapshot, type TimelineEntry, type TimerState, type Training } from '@mbfd/domain'
+import { applyDiff, diffObjects, isEmptyDiff, reconcileHoses, type SceneContext, type SceneDiff } from '@mbfd/fire-model'
 import { boardFromTemplate } from '../templates'
 
 const HISTORY_LIMIT = 200
@@ -9,7 +9,18 @@ export function sceneContext(scenario: Scenario): SceneContext {
   return { calibration: scenario.calibration, apparatusLengthFt: scenario.apparatusLengthFt }
 }
 
-export function elapsedMs(timer: TimerState, now = Date.now()): number {
+/** Server clock minus this device's clock, so a shared timer reads the same everywhere. */
+let clockOffsetMs = 0
+
+export function setClockOffset(offset: number) {
+  clockOffsetMs = Number.isFinite(offset) ? offset : 0
+}
+
+export function sharedNow(): number {
+  return Date.now() + clockOffsetMs
+}
+
+export function elapsedMs(timer: TimerState, now = sharedNow()): number {
   return timer.accumulatedMs + (timer.running && timer.startedAt !== null ? Math.max(0, now - timer.startedAt) : 0)
 }
 
@@ -19,11 +30,16 @@ export interface BoardStore {
   board: Board
   /** True once the saved board has been read from storage. */
   hydrated: boolean
-  past: SceneObject[][]
-  future: SceneObject[][]
+  /** Your own changes, as reversible diffs, so undo never touches other people's work. */
+  past: HistoryStep[]
+  future: HistoryStep[]
   /** Objects as they were when a drag or other continuous edit began. */
   transientBase: SceneObject[] | null
-  setBoard(board: Board, options?: { hydrated?: boolean }): void
+  setBoard(board: Board, options?: { hydrated?: boolean; live?: boolean }): void
+  /** Applies a change made by someone else in a shared scene. */
+  applyRemote(patch: ScenePatch): void
+  /** Someone replaced the whole shared scene (reset, import, restore). */
+  replaceRemote(board: Board, options?: { keepHistory?: boolean }): void
   commit(update: ObjectsUpdate, label: string): void
   beginTransient(): void
   setTransient(update: ObjectsUpdate): void
@@ -58,6 +74,24 @@ export function pauseStaleClock(board: Board): Board {
   return { ...board, training: { ...board.training, timer: { running: false, startedAt: null, accumulatedMs: timer.accumulatedMs + ran } } }
 }
 
+export interface HistoryStep {
+  undo: SceneDiff
+  redo: SceneDiff
+}
+
+/** The change from before to after, plus its exact inverse. */
+function historyStep(before: readonly SceneObject[], after: readonly SceneObject[]): HistoryStep {
+  const redo = diffObjects(before, after)
+  const previous = new Map(before.map((object) => [object.id, object]))
+  const touched = [...redo.upserts.map((object) => object.id), ...redo.removes]
+  const undo: SceneDiff = {
+    upserts: touched.flatMap((id) => { const object = previous.get(id); return object ? [object] : [] }),
+    removes: redo.upserts.filter((object) => !previous.has(object.id)).map((object) => object.id),
+    ...(redo.order ? { order: before.map((object) => object.id) } : {}),
+  }
+  return { undo, redo }
+}
+
 function resolve(update: ObjectsUpdate, objects: SceneObject[]): SceneObject[] {
   return typeof update === 'function' ? update(objects) : update
 }
@@ -88,7 +122,25 @@ export const useBoard = create<BoardStore>()((set, get) => ({
 
   setBoard(board, options = {}) {
     const objects = reconcileHoses(board.objects, sceneContext(board.scenario))
-    set({ board: pauseStaleClock(objects === board.objects ? board : { ...board, objects }), past: [], future: [], transientBase: null, hydrated: options.hydrated ?? true })
+    const reconciled = objects === board.objects ? board : { ...board, objects }
+    // A shared scene's clock keeps running for everyone; only local boards pause on reopen.
+    set({ board: options.live ? reconciled : pauseStaleClock(reconciled), past: [], future: [], transientBase: null, hydrated: options.hydrated ?? true })
+  },
+
+  applyRemote(patch) {
+    const { board, transientBase } = get()
+    let next = applyScenePatch(board, patch)
+    const objects = reconcileHoses(next.objects, sceneContext(next.scenario))
+    if (objects !== next.objects) next = { ...next, objects }
+    // Keep a drag in progress consistent with everyone else's edits.
+    const base = transientBase && (patch.upserts || patch.removes || patch.order) ? applyScenePatch({ ...board, objects: transientBase }, { upserts: patch.upserts, removes: patch.removes, order: patch.order }).objects : transientBase
+    set({ board: next, transientBase: base })
+  },
+
+  replaceRemote(board, options = {}) {
+    if (!options.keepHistory) { get().setBoard(board, { live: true }); return }
+    const objects = reconcileHoses(board.objects, sceneContext(board.scenario))
+    set({ board: objects === board.objects ? board : { ...board, objects }, transientBase: null, hydrated: true })
   },
 
   commit(update, label) {
@@ -100,7 +152,7 @@ export const useBoard = create<BoardStore>()((set, get) => ({
       set({ board: next === board.objects ? board : { ...board, objects: next }, transientBase: null })
       return
     }
-    set({ board: withObjects(board, before, next, label), past: [...past, before].slice(-HISTORY_LIMIT), future: [], transientBase: null })
+    set({ board: withObjects(board, before, next, label), past: [...past, historyStep(before, next)].slice(-HISTORY_LIMIT), future: [], transientBase: null })
   },
 
   beginTransient() {
@@ -119,7 +171,7 @@ export const useBoard = create<BoardStore>()((set, get) => ({
     const { board, transientBase, past } = get()
     if (!transientBase) return
     if (board.objects === transientBase) { set({ transientBase: null }); return }
-    set({ board: withObjects(board, transientBase, board.objects, label), past: [...past, transientBase].slice(-HISTORY_LIMIT), future: [], transientBase: null })
+    set({ board: withObjects(board, transientBase, board.objects, label), past: [...past, historyStep(transientBase, board.objects)].slice(-HISTORY_LIMIT), future: [], transientBase: null })
   },
 
   cancelTransient() {
@@ -130,18 +182,18 @@ export const useBoard = create<BoardStore>()((set, get) => ({
 
   undo() {
     const { board, past, future } = get()
-    const previous = past.at(-1)
-    if (!previous) return
-    const objects = reconcileHoses(previous, sceneContext(board.scenario))
-    set({ board: withObjects(board, board.objects, objects, 'Undo'), past: past.slice(0, -1), future: [...future, board.objects].slice(-HISTORY_LIMIT), transientBase: null })
+    const step = past.at(-1)
+    if (!step) return
+    const objects = reconcileHoses(applyDiff(board.objects, step.undo), sceneContext(board.scenario))
+    set({ board: withObjects(board, board.objects, objects, 'Undo'), past: past.slice(0, -1), future: [...future, step].slice(-HISTORY_LIMIT), transientBase: null })
   },
 
   redo() {
     const { board, past, future } = get()
-    const following = future.at(-1)
-    if (!following) return
-    const objects = reconcileHoses(following, sceneContext(board.scenario))
-    set({ board: withObjects(board, board.objects, objects, 'Redo'), past: [...past, board.objects].slice(-HISTORY_LIMIT), future: future.slice(0, -1), transientBase: null })
+    const step = future.at(-1)
+    if (!step) return
+    const objects = reconcileHoses(applyDiff(board.objects, step.redo), sceneContext(board.scenario))
+    set({ board: withObjects(board, board.objects, objects, 'Redo'), past: [...past, step].slice(-HISTORY_LIMIT), future: future.slice(0, -1), transientBase: null })
   },
 
   renameBoard(name) {
@@ -168,7 +220,7 @@ export const useBoard = create<BoardStore>()((set, get) => ({
     const { board } = get()
     if (board.training.timer.running) return
     const run = board.run ?? { startedAt: new Date().toISOString(), base: board.objects, entries: [] }
-    set({ board: { ...board, run, training: { ...board.training, timer: { ...board.training.timer, running: true, startedAt: Date.now() } }, updatedAt: new Date().toISOString() } })
+    set({ board: { ...board, run, training: { ...board.training, timer: { ...board.training.timer, running: true, startedAt: sharedNow() } }, updatedAt: new Date().toISOString() } })
   },
 
   pauseTimer() {

@@ -23,6 +23,8 @@ export function useShortcuts() {
 
       // Replay shows a past scene; editing shortcuts would change the live board unseen.
       if (ui.reviewing) { if (key === 'escape') ui.setReviewing(false); return }
+      // The classroom display is view-only: fit and fullscreen, nothing else.
+      if (ui.display) { if (key === 'f') canvasApi.current?.fit(); return }
       if (mod && key === 'z') { event.preventDefault(); if (event.shiftKey) board.redo(); else board.undo(); return }
       if (mod && key === 'y') { event.preventDefault(); board.redo(); return }
       // A focused button handles its own Enter and Space.

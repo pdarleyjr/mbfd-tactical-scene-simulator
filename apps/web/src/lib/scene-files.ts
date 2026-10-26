@@ -18,7 +18,7 @@ export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return response.blob()
 }
 
-function blobRefs(board: Board): Extract<MediaRef, { kind: 'blob' }>[] {
+export function blobRefs(board: Board): Extract<MediaRef, { kind: 'blob' }>[] {
   const refs = [board.scenario.background, board.scenario.video, board.scenario.poster]
   return refs.filter((ref): ref is Extract<MediaRef, { kind: 'blob' }> => ref?.kind === 'blob')
 }

@@ -5,7 +5,7 @@
   handle /api/health {
     header Content-Type application/json
     header Cache-Control "no-store"
-    respond `{"status":"ok","service":"mbfd-tactical-scene-simulator","release":"{$APP_RELEASE}","mode":"static"}` 200
+    respond `{"status":"ok","service":"mbfd-tactical-scene-simulator","release":"{$APP_RELEASE}","mode":"live"}` 200
   }
 
   # V2 server routes no longer exist; answer plainly instead of serving the app.
@@ -16,6 +16,20 @@
     respond "Not found" 404
   }
 
+  # Live shared scenes: WebSocket rooms, saved versions, and uploaded media.
+  handle /sync/* {
+    reverse_proxy sync:8090
+  }
+  handle /sync-api/* {
+    request_body {
+      max_size 100MB
+    }
+    reverse_proxy sync:8090
+  }
+  handle /media/* {
+    reverse_proxy sync:8090
+  }
+
   # The service worker is the release manifest for installed clients. It must
   # always reach the origin, or clients can stay pinned to an old interface.
   @serviceWorker path /sw.js /workbox-*.js /registerSW.js
@@ -24,7 +38,7 @@
     CDN-Cache-Control "no-store"
   }
 
-  @entryDocument path / /index.html /manifest.webmanifest
+  @entryDocument path / /index.html /manifest.webmanifest /s/*
   header @entryDocument {
     Cache-Control "no-cache, must-revalidate"
     CDN-Cache-Control "no-store"
@@ -54,7 +68,7 @@
     Referrer-Policy strict-origin-when-cross-origin
     Permissions-Policy "camera=(), microphone=(), geolocation=()"
     # Cloudflare injects its Web Analytics beacon at the edge; allow only that script and its endpoint.
-    Content-Security-Policy "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob: https://cloudflareinsights.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    Content-Security-Policy "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss://{host} data: blob: https://cloudflareinsights.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     -Server
   }
 }

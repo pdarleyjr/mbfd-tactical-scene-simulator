@@ -1,9 +1,9 @@
 import type { Board } from '@mbfd/domain'
 
 /**
- * Device-local persistence. Boards, uploaded media, and preferences live in
- * this browser's IndexedDB. Nothing here synchronizes between devices; moving
- * work to another device is done with exported scene files.
+ * Device-local storage. Live scenes are kept on the sync server; this browser's
+ * IndexedDB holds a cached copy of each live scene for a fast, offline-tolerant
+ * start, plus boards and media saved here before scenes were shared.
  *
  * When IndexedDB is unavailable (some private-browsing modes) the store falls
  * back to memory and reports `durable: false` so the UI can say so plainly.

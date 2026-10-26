@@ -76,7 +76,7 @@ describe('commit, undo, and redo', () => {
     const initial = objects()
     const note = addNote()
     expect(objects()).toHaveLength(initial.length + 1)
-    expect(store().past).toEqual([initial])
+    expect(store().past).toEqual([{ undo: { upserts: [], removes: [note.id] }, redo: { upserts: [note], removes: [] } }])
 
     store().undo()
     expect(objects()).toEqual(initial)
@@ -126,6 +126,57 @@ describe('commit, undo, and redo', () => {
   })
 })
 
+describe('shared scenes', () => {
+  it('undo reverts only this browser’s change, never someone else’s', () => {
+    const mine = addNote('mine')
+    const theirs = createNote({ x: 300, y: 300 }, 'theirs')
+    store().applyRemote({ upserts: [theirs] })
+    expect(store().past).toHaveLength(1)
+    store().undo()
+    expect(objects().some((object) => object.id === mine.id)).toBe(false)
+    expect(objects().some((object) => object.id === theirs.id)).toBe(true)
+    store().redo()
+    expect(objects().some((object) => object.id === mine.id)).toBe(true)
+  })
+
+  it('undoing a move restores only the moved object, keeping a remote edit to another', () => {
+    const a = addNote('a')
+    const b = addNote('b')
+    store().commit((current) => current.map((object) => object.id === a.id ? translateObject(object, 50, 0) : object), 'Move a')
+    store().applyRemote({ upserts: [{ ...b, text: 'edited elsewhere' } as SceneObject] })
+    store().undo()
+    expect(objects().find((object) => object.id === a.id)).toMatchObject({ x: 100 })
+    expect(objects().find((object) => object.id === b.id)).toMatchObject({ text: 'edited elsewhere' })
+  })
+
+  it('applies remote changes without recording history and keeps a drag base in step', () => {
+    const note = addNote()
+    store().beginTransient()
+    const removed = createNote({ x: 1, y: 1 }, 'x')
+    store().applyRemote({ upserts: [removed] })
+    expect(store().transientBase?.some((object) => object.id === removed.id)).toBe(true)
+    store().applyRemote({ removes: [note.id] })
+    expect(store().transientBase?.some((object) => object.id === note.id)).toBe(false)
+    expect(store().past).toHaveLength(1)
+  })
+
+  it('replaces the scene from the server, keeping history only when asked', () => {
+    addNote()
+    const fresh = boardFromTemplate()
+    store().replaceRemote(fresh, { keepHistory: true })
+    expect(store().past).toHaveLength(1)
+    store().replaceRemote(fresh)
+    expect(store().past).toEqual([])
+    expect(store().board.id).toBe(fresh.id)
+  })
+
+  it('keeps a shared clock running when a live board loads', () => {
+    const board = boardFromTemplate()
+    const running = { ...board, training: { ...board.training, timer: { running: true, startedAt: START.getTime() - 60_000, accumulatedMs: 0 } } }
+    store().setBoard(running, { live: true })
+    expect(store().board.training.timer.running).toBe(true)
+  })
+})
 describe('transient edits', () => {
   it('turns a drag into a single history entry', () => {
     const note = addNote()
@@ -144,7 +195,7 @@ describe('transient edits', () => {
     expect(store().transientBase).toBeNull()
 
     store().undo()
-    expect(objects()).toBe(beforeDrag)
+    expect(objects()).toEqual(beforeDrag)
   })
 
   it('keeps the first base when begun twice and auto-begins on setTransient', () => {
@@ -184,10 +235,10 @@ describe('transient edits', () => {
     store().beginTransient()
     store().setTransient((current) => [...current, createNote({ x: 0, y: 0 }, 'dragging')])
     store().commit((current) => [...current, createNote({ x: 5, y: 5 }, 'dropped')], 'Drop')
-    expect(store().past).toEqual([base])
+    expect(store().past).toHaveLength(1)
     expect(store().transientBase).toBeNull()
     store().undo()
-    expect(objects()).toBe(base)
+    expect(objects()).toEqual(base)
   })
 
   it('clears the transient base when a commit inside a drag restores the start', () => {

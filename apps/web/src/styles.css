@@ -174,7 +174,17 @@ textarea.input { resize: vertical; line-height: 1.4; }
 .menu__item:hover { background: var(--surface-3); }
 .menu__item svg { color: var(--text-3); }
 .menu__item--check input { width: 18px; height: 18px; accent-color: var(--blue-strong); }
-
+.live-menu__toggle { min-height: 40px; background: transparent; border-top: 0; border-right: 0; border-bottom: 0; cursor: pointer; font: inherit; font-size: 13px; }
+.live-menu__toggle:hover { color: var(--text); }
+.live-menu__toggle svg { color: var(--blue); }
+.live-menu .menu__list { left: 0; right: auto; min-width: 300px; }
+.live-menu__lead { display: grid; gap: 4px; margin: 0 0 6px; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.live-menu__lead > span:last-child { font-size: 13px; color: var(--text-3); }
+.live-menu__title { color: var(--text-2); }
+.live-menu__title strong { color: var(--text); }
+.library__heading svg { vertical-align: -3px; color: var(--text-3); }
+.library__list--compact { margin-bottom: 6px; }
+.board-card--compact { padding: 8px 12px; }
 /* ---------- Tool dock and trays ---------- */
 
 .dock {
@@ -450,7 +460,15 @@ textarea.input { resize: vertical; line-height: 1.4; }
   background: rgba(11, 16, 19, 0.88); border: 1px solid var(--line); border-radius: var(--radius);
   font-family: var(--display); font-weight: 700; font-size: clamp(30px, 3.4vw, 60px); font-variant-numeric: tabular-nums;
 }
-.present__benchmarks {
+.present__live {
+  position: absolute; top: calc(var(--top) + clamp(72px, 6.2vw, 120px)); right: calc(var(--gap) + var(--safe-right)); display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px; background: rgba(11, 16, 19, 0.88); border: 1px solid var(--line); border-radius: 999px;
+  font-size: clamp(13px, 1vw, 18px); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2);
+}
+.present__live span { width: 10px; height: 10px; border-radius: 50%; background: var(--red-strong); animation: pulse 1400ms ease-in-out infinite; }
+.present__live[data-connection='reconnecting'], .present__live[data-connection='connecting'] { color: var(--amber); }
+.present__live[data-connection='reconnecting'] span, .present__live[data-connection='connecting'] span { background: var(--amber); animation: none; }
+.app[data-display] .present__controls { opacity: 0.85; }.present__benchmarks {
   position: absolute; left: calc(var(--gap) + var(--safe-left)); top: calc(var(--top) + 100px); list-style: none; margin: 0; padding: 8px;
   display: grid; gap: 6px; pointer-events: auto; background: rgba(11, 16, 19, 0.9); border: 1px solid var(--line); border-radius: var(--radius); width: min(420px, 40vw);
 }
@@ -540,6 +558,7 @@ textarea.input { resize: vertical; line-height: 1.4; }
 @media (max-width: 1100px) {
   .chip__label { display: none; }
   .save-indicator__text { display: none; }
+  .live-menu .save-indicator__text { display: inline; }
   :root { --panel-width: min(340px, calc(100vw - 110px)); }
 }
 
@@ -550,6 +569,8 @@ textarea.input { resize: vertical; line-height: 1.4; }
   .topbar__name { font-size: 15px; max-width: 46vw; }
   .topbar__mark { width: 32px; height: 32px; }
   .save-indicator { padding: 0 6px; }
+  .live-menu .save-indicator__text { display: none; }
+  .present__live { top: auto; bottom: calc(var(--gap) + 84px); }
   .timer-chip__time { min-width: 48px; font-size: 16px; }
   .dock {
     top: auto; bottom: calc(var(--gap) + var(--safe-bottom)); left: calc(var(--gap) + var(--safe-left)); right: calc(var(--gap) + var(--safe-right));

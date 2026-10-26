@@ -1,13 +1,30 @@
 # Architecture (V3)
 
-## Decision: static, single operator
+## Decision: shared live scenes, no accounts
 
-V2 was a three-service system (Caddy, Fastify + Hocuspocus/Yjs, PostgreSQL) built so many participants could join rooms with roles, tokens, unit ownership, and a private Command 300 workspace. The product requirement is now one instructor operating one board. Everything that existed only to coordinate several people was removed: rooms, PINs, signed tokens, roles and permissions, presence, WebSocket sync, the private 300 document, and the server and database behind them.
+V2 was a three-service system (Caddy, Fastify + Hocuspocus/Yjs, PostgreSQL) built so many participants could join rooms with roles, tokens, unit ownership, and a private Command 300 workspace. V3 removed all of that: no rooms to join, PINs, signed tokens, roles, unit logins, or database.
 
-What remains is a static React application. The browser holds the working state; durability comes from IndexedDB, and portability from exported scene files. There is no server to secure, migrate, or keep running, and the app works offline once loaded (PWA).
+What V3 keeps is the simplest form of collaboration: everyone who opens the same link works on the same scene. `/` is the main scene, `/s/<id>` a separate one, and `?view=present` a view-only classroom display of either. There is still nothing to sign in to.
 
-If cross-device sharing becomes a requirement later, it should be added as an explicit "save to MBFD Hub" path behind Hub authentication, not by reviving rooms.
+Two parts:
 
+- **apps/web**: the React app. It holds the working board, renders it, and sends what changed.
+- **apps/sync**: a small Node service (`ws`, no database). One room per scene id holds the authoritative board in memory, applies changes in arrival order, relays them, and saves to disk.
+
+### Live protocol (`packages/domain/src/sync.ts`)
+
+- A browser connects to `/sync/<sceneId>` and sends `hello` with a seed board. A scene that does not exist yet is created from the seed (the original scenario, or an imported board); otherwise the seed is ignored and the browser receives `state`.
+- Changes travel as **patches**: `upserts` and `removes` of scene objects (merged per object, last write wins), an optional `order`, and whole replacements of `scenario`, `training`, `snapshots`, and `name`. While the clock records a run, only new timeline entries are sent (`runAppend`).
+- The client keeps a *shadow* of what the server has. Each local change is diffed against the shadow (`diffBoards`) and sent, batched to roughly 30 ms (90 ms during a drag, so others see the unit move). Remote patches are applied without being echoed back.
+- While disconnected, edits continue locally. On reconnect the server's state is loaded and the offline edits are re-applied on top, then sent.
+- Undo/redo records each local change as a reversible diff (`store/board.ts`), so undo takes back only this browser's own change and never someone else's.
+- The training clock is shared: `startedAt` uses the server's clock (offset learned from `state` and `pong`), so every screen shows the same time.
+
+### Server storage
+
+`DATA_DIR/scenes/<id>/current.json` is written about 600 ms after changes (atomic rename, one write at a time per scene). `history/` holds automatic snapshots: every 5 minutes while edited, before a replace or restore, when the last person leaves, and on shutdown; the newest 100 are kept. Uploaded media is stored under `DATA_DIR/media/` and served at `/media/<uuid>.<ext>` (PNG/JPEG/WebP up to 40 MB, MP4/WebM up to 95 MB, 8 GB total). Limits: 80 people per scene, 2,000 scenes, 80 messages per second per connection, 8 MB per message.
+
+Each browser also caches the last state of each scene it opened (IndexedDB) so the board appears immediately, before the connection opens.
 ## Data model
 
 `packages/domain/src/scene.ts` defines schema version 3:
@@ -34,15 +51,16 @@ Pure functions, unit tested:
 
 ## State and interaction (`apps/web`)
 
-- `store/board.ts` (zustand): the board document, undo/redo (structural sharing of immutable object arrays), transient edits for drags and rotations (one history entry per gesture), training clock, snapshots, and timeline recording.
+- `store/board.ts` (zustand): the board document, undo/redo as reversible per-change diffs, remote patch application, transient edits for drags and rotations (one history entry per gesture), training clock, snapshots, and timeline recording.
 - `store/ui.ts`: tool, selection, view transform, panels, dialogs, drafts, toasts.
 - `canvas/SceneStage.tsx`: Konva stage with background, apparatus, hose, symbol, label, and overlay layers. Native pointer handling provides pan, pinch, wheel zoom, marquee, taps, and freehand strokes; Konva handles object dragging and the rotate handle. The view is preserved through resizes and panel changes.
-- `lib/workspace.ts`: boot, debounced autosave with visible status, flush on hide, cross-tab change notice (BroadcastChannel), library operations, import/export.
+- `lib/live.ts`: the live connection: scene id from the address, hello/state, sending and applying patches, reconnect with backoff, presence, shared clock.
+- `lib/workspace.ts`: boot (cached copy, then live), separate scenes, media upload, saved versions, import/export.
 
 ## Testing
 
-- `pnpm test:coverage`: domain, fire-model, store, storage, scene files, formatting, debrief.
-- `pnpm test:e2e`: Playwright on desktop (1440×900) and tablet (iPad Pro 11 landscape). Covers first load, repeat placement, selection/drag/rotate/duplicate/undo, forward lay that follows a moved engine, skid load, hose reshaping, calibration, autosave/reload/reset, export/import, training flow, presentation and replay, and a 100-apparatus/40-hose stress scene.
+- `pnpm test:coverage`: domain (including the live patch protocol), fire-model, store, storage, scene files, formatting, debrief, and the sync service (rooms, saving, snapshots, restore, media, limits) against a real WebSocket server.
+- `pnpm test:e2e`: Playwright on desktop (1440×900) and tablet (iPad Pro 11 landscape). Covers first load, repeat placement, selection/drag/rotate/duplicate/undo, forward lay that follows a moved engine, skid load, hose reshaping, calibration, autosave/reload/reset, export/import, training flow, presentation and replay, a 100-apparatus/40-hose stress scene, and shared scenes with two browsers: live edits both ways, per-person undo, presence, separate scenes, the view-only classroom display, and recovery from a dropped connection. Each test runs in its own scene.
 - `playwright.visual.config.ts`: screenshot captures from phone to 4K for design review.
 
 In development builds only, `window.__sim` exposes the stores for tests.

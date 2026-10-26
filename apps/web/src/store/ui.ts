@@ -51,6 +51,8 @@ interface UiStore {
   panel: Panel
   dialog: Dialog
   presenting: boolean
+  /** Read-only classroom display (the ?view=present link): shows the live scene, edits nothing. */
+  display: boolean
   reviewing: boolean
   reviewAtMs: number
   compareSnapshotId: string | null
@@ -62,7 +64,6 @@ interface UiStore {
   lastRotation: Partial<Record<ApparatusTemplateId, number>>
   pendingCalibration: { a: Vec; b: Vec } | null
   bannerInjectId: string | null
-  otherTabChanged: boolean
   toasts: Toast[]
   setTool(tool: Tool): void
   armApparatus(templateId: ApparatusTemplateId | null): void
@@ -77,6 +78,7 @@ interface UiStore {
   openDialog(dialog: Dialog): void
   closeDialog(): void
   setPresenting(presenting: boolean): void
+  setDisplay(display: boolean): void
   setReviewing(reviewing: boolean): void
   setReviewAt(ms: number): void
   setCompareSnapshot(id: string | null): void
@@ -86,7 +88,6 @@ interface UiStore {
   rememberRotation(templateId: ApparatusTemplateId, rotation: number): void
   setPendingCalibration(pending: UiStore['pendingCalibration']): void
   showInjectBanner(id: string | null): void
-  setOtherTabChanged(changed: boolean): void
   toast(message: string, tone?: Toast['tone'], action?: Toast['action']): void
   dismissToast(id: number): void
 }
@@ -104,6 +105,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   panel: 'none',
   dialog: 'none',
   presenting: false,
+  display: false,
   reviewing: false,
   reviewAtMs: 0,
   compareSnapshotId: null,
@@ -113,7 +115,6 @@ export const useUi = create<UiStore>()((set, get) => ({
   lastRotation: {},
   pendingCalibration: null,
   bannerInjectId: null,
-  otherTabChanged: false,
   toasts: [],
 
   setTool(tool) {
@@ -136,6 +137,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   openDialog(dialog) { set({ dialog }) },
   closeDialog() { set({ dialog: 'none' }) },
   setPresenting(presenting) { set({ presenting, ...(presenting ? { tool: 'select' as Tool, draft: null } : {}) }) },
+  setDisplay(display) { set({ display, presenting: display, tool: 'select', draft: null, selection: [] }) },
   setReviewing(reviewing) { set({ reviewing, selection: [], draft: null, tool: 'select', ...(reviewing ? {} : { reviewAtMs: 0 }) }) },
   setReviewAt(reviewAtMs) { set({ reviewAtMs }) },
   setCompareSnapshot(compareSnapshotId) { set({ compareSnapshotId }) },
@@ -145,7 +147,6 @@ export const useUi = create<UiStore>()((set, get) => ({
   rememberRotation(templateId, rotation) { set({ lastRotation: { ...get().lastRotation, [templateId]: rotation } }) },
   setPendingCalibration(pendingCalibration) { set({ pendingCalibration }) },
   showInjectBanner(bannerInjectId) { set({ bannerInjectId }) },
-  setOtherTabChanged(otherTabChanged) { set({ otherTabChanged }) },
   toast(message, tone = 'info', action) {
     const id = ++toastCounter
     set({ toasts: [...get().toasts.slice(-3), { id, message, tone, action }] })
