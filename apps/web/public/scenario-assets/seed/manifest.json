@@ -40,6 +40,11 @@
     "sha256": "d030f3a80f6badfe30d1a33e7a8432681cb197e270d48405646c5d11d5af92c3"
   },
   {
+    "path": "data/assets/source/apparatus/Rescue.png",
+    "bytes": 2120294,
+    "sha256": "a863eb6401a9ecd60a5936f6ce4ddc50dbd375e365990927ee84cc7e3d1b1f7e"
+  },
+  {
     "path": "apps/web/public/scenario-assets/seed/background-thumb.webp",
     "bytes": 90698,
     "sha256": "1627e877e300ef08200792e5abcb72abb636e2631289df6658a7d82e05a92979"
@@ -88,5 +93,10 @@
     "path": "apps/web/public/scenario-assets/seed/apparatus/L3.webp",
     "bytes": 94708,
     "sha256": "d1c931cb6db89d3fbbc4c3180f0da4cae931ecf3448d6fed232b997102187874"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/Rescue.webp",
+    "bytes": 70344,
+    "sha256": "9e13ce3943985ce0c6e195bace26d1be14764f224d3332d618db5b25bd01ec53"
   }
 ]

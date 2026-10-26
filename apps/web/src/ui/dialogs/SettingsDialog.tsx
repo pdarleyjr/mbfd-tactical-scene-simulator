@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Crosshair, ImageUp, Plus, RotateCcw, Trash2, Video } from 'lucide-react'
-import { apparatusCatalog, defaultBenchmarkCatalog, defaultHoseLoads, hoseCatalog, type HoseLoads, type HoseType, type Scenario } from '@mbfd/domain'
+import { apparatusCatalog, apparatusModels, defaultBenchmarkCatalog, defaultHoseLoads, hoseCatalog, type HoseLoads, type HoseType, type Scenario } from '@mbfd/domain'
 import { useBoard } from '../../store/board'
 import { useUi } from '../../store/ui'
 import { attachVideo, replaceBackground } from '../../lib/workspace'
@@ -103,12 +103,13 @@ function TrainingSettings() {
 }
 
 const loadLabels: Record<keyof HoseLoads['loadLengthFt'], string> = {
-  'forward-lay': 'Forward lay (5″)',
-  'reverse-lay': 'Reverse lay (5″)',
-  jumpline: 'Jumpline (1¾″)',
-  'skid-load': 'Skid load feeder (3″)',
-  'skid-load-attack': 'Skid load attack (1¾″)',
-  'high-rise-pack': 'High-rise pack (1¾″)',
+  jumpline: 'Preconnect / jumpline (1¾″)',
+  trashline: 'Trash line (1¾″, 100′ + 50′ roll)',
+  'high-rise-pack': 'High-rise packs (1¾″)',
+  'forward-lay': '5″ supply, forward lay',
+  'reverse-lay': '5″ supply, reverse lay',
+  'skid-load': '3″ line, one bed side',
+  'skid-load-attack': 'Attack line off the wye (1¾″)',
 }
 
 function ScaleSettings() {
@@ -138,26 +139,16 @@ function ScaleSettings() {
         )}
       </Field>
       {error && <p className="status-line status-line--warning">{error}</p>}
-      <h3>Apparatus length (verified, optional)</h3>
-      <p className="fine-print">Leave blank unless you have the unit's verified overall length. With a calibrated map, entered lengths draw that unit to scale; blank units use a default drawing size.</p>
-      <div className="length-grid">
-        {apparatusCatalog.map((template) => (
-          <label key={template.id} className="length-grid__item">
-            <span>{template.id}</span>
-            <input className="input input--number" type="number" min={10} max={120} step={0.5} placeholder="ft" value={scenario.apparatusLengthFt[template.id] ?? ''} onChange={(event) => {
-              const value = event.target.value === '' ? undefined : Number(event.target.value)
-              update((current) => {
-                const lengths = { ...current.apparatusLengthFt }
-                if (value && value > 0) lengths[template.id] = Math.min(200, value)
-                else delete lengths[template.id]
-                return { ...current, apparatusLengthFt: lengths }
-              })
-            }} />
-          </label>
-        ))}
-      </div>
+      <h3>Apparatus</h3>
+      <p className="fine-print">Lengths and driver's-side intake positions from MBFD apparatus specifications. On a calibrated map every unit is drawn to scale. Change a ladder's model from its inspector.</p>
+      <ul className="model-list">
+        {apparatusCatalog.map((template) => {
+          const model = apparatusModels[template.model]
+          return <li key={template.id}><strong>{template.id}</strong><span>{model.label}</span><span>{Math.round(model.lengthFt * 10) / 10} ft{model.intakeFromFrontFt !== null ? `, intake ${model.intakeFromFrontFt} ft from front` : ', no pump'}</span></li>
+        })}
+      </ul>
       <h3>Hose loads</h3>
-      <p className="fine-print">Defaults carried over from V2. Set them to match MBFD hose loads; lines longer than their load are flagged.</p>
+      <p className="fine-print">MBFD hose: 1¾″ in 100′ sections, 3″ in 50′ sections (800′ each side of the bed), 5″ in 100′ sections (about 800′ carried). Lines longer than their load are flagged.</p>
       <div className="length-grid">
         {(Object.keys(loadLabels) as Array<keyof HoseLoads['loadLengthFt']>).map((key) => (
           <label key={key} className="length-grid__item length-grid__item--wide">

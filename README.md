@@ -8,9 +8,8 @@ No accounts, rooms, PINs, or unit logins. The instructor is the operator.
 
 | Area | How it works |
 | --- | --- |
-| Apparatus | E1, E2, E3, E4, L1, L3 using the department's top-down artwork. Unlimited copies, auto-labelled (E1, E1-2, …) and renamable. Tap a unit then tap the map (repeat taps keep placing), or drag a unit onto the map. Drag to move, round handle to rotate (15° snaps, Shift for free), `[` `]` to rotate, arrows to nudge, Ctrl+D to duplicate, lock, front/back, undo/redo. Optional assignment text under each unit. |
-| Hose | 1¾″ attack, 3″ (feeder or attack), 5″ supply. Tap points or drag a finger along the route; start or end on a port to connect. After drawing: drag points, drag a **+** to add a bend, double-tap a bend to remove it, drag an end onto/off a port, extend an open line, straighten. Connected ends follow when apparatus or hydrants move. |
-| Evolutions | Forward lay (hydrant → engine), reverse lay (engine → hydrant), jumpline, skid load (3″ feeder → gated wye → 1¾″ attack → nozzle), high-rise pack. Guided prompts, eligible ports highlighted, wyes and nozzles placed automatically, routes compared with the configured load length. Quick actions on a selected engine or hydrant ("Pull skid load", "Forward lay from here"). |
+| Apparatus | E1–E4 (Pierce PUC), L1 (Pierce Ascendant 100′ tower), L3 (Pierce Arrow XT 100′ ladder), R1–R4 (Horton rescue), using MBFD artwork drawn to real length on a calibrated map. Each unit goes on the scene once: tap it in the tray, tap the map, and it is selected and ready to drag. Tapping a placed unit selects it. Move by dragging or with the inspector's nudge pad (1 or 5 ft, pull forward/back up), rotate with the round handle (15° snaps, Shift for free), the 1° and 15° buttons, or `[` `]`. Undo/redo everything. |
+| Hose | Tap the engine or hydrant the line starts from (anywhere on it), tap the route or drag a finger along it, and tap the truck or hydrant it ends at. Trucks never move while laying hose. Preconnect/jumpline 200′ (two 100′ sections), trash line 100′ + 50′ roll, high-rise packs 2 × 100′, 5″ supply in 100′ sections (about 800′ carried; starting at a hydrant is a forward lay, at an engine a reverse lay), 3″ in 50′ sections (800′ per side) to a gated wye. Attack lines finish with a nozzle. Lines longer than the hose carried are flagged. After drawing: drag points, drag a **+** to add a bend, double-tap a bend to remove it, drag an end onto or off a port, extend, straighten. |
 | Water supply | Live connectivity analysis: which units are hydrant-supplied, which are on tank water, open ends, attack lines without nozzles, out-of-service hydrants, over-length lays. Animated flow on connected lines. This is connectivity only; **no pressure or flow is calculated**. |
 | Measurement | Two-point calibration from a known distance. Before calibration every length reads in map units (`u`) and the UI says "Not calibrated". After: hose routes in feet, section counts, scale bar, ruler, zone radii in feet. |
 | Scene | Hydrants (status, instructor notes), markers (command post, staging, RIT, rehab, entry, victim, hazard, fire, exposure, ventilation, division, resizable collapse zone), notes, arrows, pinned measurements, wind and north indicators, weather. Layer toggles. |
@@ -20,12 +19,13 @@ No accounts, rooms, PINs, or unit logins. The instructor is the operator.
 | Saving | Autosave to this browser (IndexedDB) with a visible status. Multiple named boards, duplicate, rename, delete with undo, non-destructive reset to the original scenario, portable scene files (export/import, including uploaded media), PNG export. A notice appears if another tab changes the same board. |
 | New scenarios | "New scenario from an image": upload an aerial or plan image, set the title and dispatch, calibrate, and build. Injects, benchmarks, video, hose loads, and verified apparatus lengths are editable in Scenario settings. |
 
-## What is and is not verified
+## Sources of the numbers
 
-- Apparatus artwork and unit identities are MBFD's. **Vehicle dimensions are not verified**; units draw at a default size unless you enter a verified length and calibrate the map, and the inspector says which.
-- Connection-point locations (rear 5″ intake, pump-panel discharges) are schematic, carried over from V2.
-- Hose section lengths (100 ft) and load lengths (forward/reverse lay 500 ft, jumpline 100 ft, skid load 300 + 200 ft, high-rise pack 200 ft) are V2 defaults, editable per scenario, and labelled as configured values.
-- Hydrant pressure or flow notes are displayed exactly as the instructor enters them.
+- Apparatus lengths and driver's-side intake distances come from MBFD apparatus specifications (Pierce PUC 32′9″, intake 13′ from the front; Ascendant 43′, 17′; Arrow XT 42′2″, 16′; Dash 2000 46′, 16′; Horton rescue 25′10″, no pump). Discharge positions are drawn at the pump panel beside the intake.
+- Hose sections and loads are MBFD figures and can be adjusted per scenario in Scenario settings.
+- The Waterfront Estate image is calibrated from its tennis court (78 ft baseline to baseline); other maps are calibrated by the operator. Until a map is calibrated, lengths read in map units and trucks draw at an approximate size.
+- The map only moves when asked to: right/middle-drag, Space + drag, two fingers, the zoom buttons, or the wheel. Dragging empty map selects an area.
+- Water supply shows connections only; no pressure or flow is calculated.
 
 ## Saved work: this device only
 

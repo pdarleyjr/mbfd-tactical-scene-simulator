@@ -97,7 +97,7 @@ export const useUi = create<UiStore>()((set, get) => ({
   tool: 'select',
   apparatusTemplate: null,
   markerType: 'command-post',
-  hoseChoice: { kind: 'free', hoseType: 'supply5', purpose: 'supply' },
+  hoseChoice: { kind: 'evolution', evolutionId: 'jumpline', nozzle: 'fog' },
   arrowColor: 'white',
   selection: [],
   view: { x: 0, y: 0, scale: 1 },

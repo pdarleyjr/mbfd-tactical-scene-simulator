@@ -5,7 +5,7 @@ import { evolutionSteps, startRuleAccepts, type StartRule } from './evolutions.j
 describe('evolutionSteps', () => {
   it('lays forward and reverse lays as single 5″ supply steps', () => {
     expect(evolutionSteps('forward-lay', defaultHoseLoads)).toEqual([
-      expect.objectContaining({ hoseType: 'supply5', purpose: 'supply', start: 'hydrant', finish: 'none', loadFt: 500, layDirection: 'forward' }),
+      expect.objectContaining({ hoseType: 'supply5', purpose: 'supply', start: 'water-source', finish: 'none', loadFt: 800, layDirection: 'forward' }),
     ])
     expect(evolutionSteps('reverse-lay', defaultHoseLoads)).toEqual([
       expect.objectContaining({ hoseType: 'supply5', start: 'intake', finish: 'none', layDirection: 'reverse' }),
@@ -13,14 +13,15 @@ describe('evolutionSteps', () => {
   })
 
   it('finishes attack evolutions with a nozzle', () => {
-    expect(evolutionSteps('jumpline', defaultHoseLoads)).toEqual([expect.objectContaining({ hoseType: 'attack175', purpose: 'attack', start: 'discharge', finish: 'nozzle', loadFt: 100 })])
+    expect(evolutionSteps('jumpline', defaultHoseLoads)).toEqual([expect.objectContaining({ hoseType: 'attack175', purpose: 'attack', start: 'discharge', finish: 'nozzle', loadFt: 200 })])
+    expect(evolutionSteps('trashline', defaultHoseLoads)).toEqual([expect.objectContaining({ hoseType: 'attack175', start: 'discharge', finish: 'nozzle', loadFt: 150 })])
     expect(evolutionSteps('high-rise-pack', defaultHoseLoads)).toEqual([expect.objectContaining({ hoseType: 'attack175', start: 'any', finish: 'nozzle', loadFt: 200 })])
   })
 
   it('builds the skid load as a feeder to a wye then an attack line', () => {
     const steps = evolutionSteps('skid-load', defaultHoseLoads)
     expect(steps.map((step) => [step.hoseType, step.purpose, step.start, step.finish, step.loadFt])).toEqual([
-      ['hose3', 'feeder', 'discharge', 'wye', 300],
+      ['hose3', 'feeder', 'discharge', 'wye', 800],
       ['attack175', 'attack', 'previous-wye', 'nozzle', 200],
     ])
     expect(steps.every((step) => step.prompt.start && step.prompt.route)).toBe(true)

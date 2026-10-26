@@ -1,5 +1,22 @@
 import { defaultBenchmarkCatalog, defaultHoseLoads } from '@mbfd/domain'
+import type { Calibration } from '@mbfd/domain'
 import type { ScenarioTemplate } from './types'
+
+/**
+ * Scale from the tennis court on the image: baseline to baseline is 78 ft
+ * (regulation). Cross-check: service line to service line reads 42.9 ft
+ * against the regulation 42 ft.
+ */
+const a = { x: 263, y: 469.5 }
+const b = { x: 248.75, y: 603 }
+export const waterfrontCalibration: Calibration = {
+  feetPerWorldUnit: 78 / Math.hypot(b.x - a.x, b.y - a.y),
+  a,
+  b,
+  distanceFt: 78,
+  reference: 'Tennis court, baseline to baseline (78 ft regulation)',
+  calibratedAt: '2026-10-26T00:00:00.000Z',
+}
 
 /**
  * Residential Structure Fire — Waterfront Estate.
@@ -22,6 +39,7 @@ export const waterfrontEstate: ScenarioTemplate = {
     world: { width: 1586, height: 992 },
     video: { kind: 'builtin', url: '/scenario-assets/seed/initial-conditions.mp4' },
     poster: { kind: 'builtin', url: '/scenario-assets/seed/initial-conditions-poster.webp' },
+    calibration: waterfrontCalibration,
     conditions: { windFromDeg: null, windNote: '', northDeg: 0, weather: '' },
     injects: [
       { id: 'occupant-report', title: 'Occupant report', description: 'A neighbor reports that one occupant may still be inside.' },

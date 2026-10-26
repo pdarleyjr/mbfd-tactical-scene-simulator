@@ -8,8 +8,8 @@ import {
   createNozzle,
   createWye,
   duplicateObjects,
+  isOnScene,
   newId,
-  nextApparatusLabel,
   nextHydrantLabel,
   translateObject,
 } from './factories.js'
@@ -22,20 +22,12 @@ function hydrant(id: string, label: string): HydrantObject {
   return { id, type: 'hydrant', label, status: 'available', notes: '', x: 10, y: 10, rotation: 0, locked: false }
 }
 
-describe('nextApparatusLabel', () => {
-  it('follows the sequence E1, E1-2, E1-3', () => {
-    expect(nextApparatusLabel('E1', [])).toBe('E1')
-    expect(nextApparatusLabel('E1', [apparatus('a', 'E1')])).toBe('E1-2')
-    expect(nextApparatusLabel('E1', [apparatus('a', 'E1'), apparatus('b', 'E1-2')])).toBe('E1-3')
-  })
-
-  it('fills gaps and compares labels case-insensitively', () => {
-    expect(nextApparatusLabel('E1', [apparatus('a', 'e1'), apparatus('b', 'E1-3')])).toBe('E1-2')
-  })
-
-  it('only counts apparatus labels', () => {
-    expect(nextApparatusLabel('E1', [hydrant('h', 'E1')])).toBe('E1')
-    expect(nextApparatusLabel('L1', [apparatus('a', 'E1')])).toBe('L1')
+describe('isOnScene', () => {
+  it('finds a unit by template, never by label', () => {
+    expect(isOnScene('E1', [])).toBe(false)
+    expect(isOnScene('E1', [apparatus('a', 'Engine One')])).toBe(true)
+    expect(isOnScene('E1', [hydrant('h', 'E1')])).toBe(false)
+    expect(isOnScene('L1', [apparatus('a', 'E1')])).toBe(false)
   })
 })
 
@@ -62,8 +54,9 @@ describe('object factories', () => {
     expect(newId()).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('labels new apparatus and hydrants against the existing scene', () => {
-    expect(createApparatus('E1', { x: 0, y: 0 }, 0, [apparatus('a', 'E1')])).toMatchObject({ label: 'E1-2', templateId: 'E1', rotation: 0 })
+  it('labels a unit by its designation and allows each unit only once', () => {
+    expect(createApparatus('R2', { x: 0, y: 0 }, 0, [])).toMatchObject({ label: 'R2', templateId: 'R2', rotation: 0 })
+    expect(() => createApparatus('E1', { x: 0, y: 0 }, 0, [apparatus('a', 'E1')])).toThrow('Engine 1 is already on the scene.')
     expect(createHydrant({ x: 0, y: 0 }, [hydrant('h', 'H1')])).toMatchObject({ label: 'H2', status: 'unknown' })
   })
 
@@ -107,33 +100,27 @@ describe('duplicateObjects', () => {
   const attack: HoseObject = { id: 'a1', type: 'hose', hoseType: 'attack175', purpose: 'attack', points: [0, 0, 50, 50], from: { objectId: 'e1', portId: 'discharge-1.5' }, to: { objectId: 'n1', portId: 'inlet' }, label: '', locked: false }
   const all = [h1, e1, n1, supply, attack]
 
-  it('copies with new ids, offsets, and fresh labels', () => {
+  it('copies with new ids, offsets, and fresh labels, but never copies a unit', () => {
     const copies = duplicateObjects([h1, e1], all)
-    expect(copies).toHaveLength(2)
-    expect(copies.map((copy) => copy.id)).not.toContain('h1')
+    expect(copies).toHaveLength(1)
     expect(copies[0]).toMatchObject({ type: 'hydrant', label: 'H2', x: 34, y: 34 })
-    expect(copies[1]).toMatchObject({ type: 'apparatus', label: 'E1-2', x: 24, y: 24 })
+    expect(copies[0]!.id).not.toBe('h1')
   })
 
   it('keeps hose connections inside the copied set and drops external ones', () => {
-    const [hCopy, eCopy, sCopy, aCopy] = duplicateObjects([h1, e1, supply, attack], all, { x: 0, y: 100 })
+    const [hCopy, nCopy, sCopy, aCopy] = duplicateObjects([h1, n1, supply, attack], all, { x: 0, y: 100 })
     const copiedSupply = sCopy as HoseObject
     const copiedAttack = aCopy as HoseObject
     expect(copiedSupply.from).toEqual({ objectId: hCopy!.id, portId: 'storz' })
-    expect(copiedSupply.to).toEqual({ objectId: eCopy!.id, portId: 'intake' })
+    expect(copiedSupply).not.toHaveProperty('to')
     expect(copiedSupply.points).toEqual([10, 110, 0, 100])
-    expect(copiedAttack.from).toEqual({ objectId: eCopy!.id, portId: 'discharge-1.5' })
-    expect(copiedAttack).not.toHaveProperty('to')
+    expect(copiedAttack.to).toEqual({ objectId: nCopy!.id, portId: 'inlet' })
+    expect(copiedAttack).not.toHaveProperty('from')
   })
 
   it('releases both ends of a hose copied on its own', () => {
     const [copy] = duplicateObjects([supply], all)
     expect(copy).not.toHaveProperty('from')
     expect(copy).not.toHaveProperty('to')
-  })
-
-  it('numbers several copies of the same apparatus in sequence', () => {
-    const copies = duplicateObjects([e1, apparatus('e1b', 'E1-2')], [e1, apparatus('e1b', 'E1-2')])
-    expect(copies.map((copy) => (copy as ApparatusObject).label)).toEqual(['E1-3', 'E1-4'])
   })
 })

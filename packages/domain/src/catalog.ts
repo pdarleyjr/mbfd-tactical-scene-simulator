@@ -1,13 +1,12 @@
 /**
  * Reference catalog for the simulator.
  *
- * Every number here is either a drawing default (world units on the scene
- * image) or a value carried forward from the V2 simulator. None of them is a
- * verified MBFD equipment fact; the UI labels them accordingly and lets the
- * operator override them per scenario.
+ * Apparatus lengths, intake positions, hose section lengths, and hose loads
+ * are MBFD-provided figures (2026-10-26). Discharge positions remain
+ * schematic: they sit at the pump panel beside the published intake.
  */
 
-export type ApparatusTemplateId = 'E1' | 'E2' | 'E3' | 'E4' | 'L1' | 'L3'
+export type ApparatusTemplateId = 'E1' | 'E2' | 'E3' | 'E4' | 'L1' | 'L3' | 'R1' | 'R2' | 'R3' | 'R4'
 export type PortSize = 'nh-1.5' | 'nh-2.5' | 'storz-5'
 export type PortDirection = 'inlet' | 'outlet'
 
@@ -21,27 +20,51 @@ export interface PortDefinition {
   y: number
 }
 
+export type ApparatusModelId = 'pierce-puc' | 'pierce-arrow-xt' | 'pierce-ascendant' | 'pierce-dash-2000' | 'horton-rescue'
+
+export interface ApparatusModel {
+  id: ApparatusModelId
+  label: string
+  lengthFt: number
+  /** Driver's-side large-diameter intake, measured from the front bumper. */
+  intakeFromFrontFt: number | null
+  pump: boolean
+}
+
+export const apparatusModels: Record<ApparatusModelId, ApparatusModel> = {
+  'pierce-puc': { id: 'pierce-puc', label: 'Pierce PUC pumper', lengthFt: 32 + 9 / 12, intakeFromFrontFt: 13, pump: true },
+  'pierce-arrow-xt': { id: 'pierce-arrow-xt', label: 'Pierce Arrow XT 100′ ladder quint', lengthFt: 42 + 2 / 12, intakeFromFrontFt: 16, pump: true },
+  'pierce-ascendant': { id: 'pierce-ascendant', label: 'Pierce Ascendant 100′ tower', lengthFt: 43, intakeFromFrontFt: 17, pump: true },
+  'pierce-dash-2000': { id: 'pierce-dash-2000', label: 'Pierce Dash 2000 100′ platform', lengthFt: 46, intakeFromFrontFt: 16, pump: true },
+  'horton-rescue': { id: 'horton-rescue', label: 'Horton rescue (2-door cab)', lengthFt: 25 + 10 / 12, intakeFromFrontFt: null, pump: false },
+}
+
+export const apparatusModelIds = Object.keys(apparatusModels) as ApparatusModelId[]
+
 export interface ApparatusTemplate {
   id: ApparatusTemplateId
   designation: string
-  kind: 'engine' | 'aerial'
+  kind: 'engine' | 'aerial' | 'rescue'
   /** Top-down artwork, front of the vehicle at the top of the image. */
   assetPath: string
   /** Width ÷ height of the artwork, used so vehicles are never stretched. */
   imageAspect: number
-  /** Drawing length on the scene when no verified length is configured. */
-  defaultLengthWorld: number
-  /** Real overall length. Unknown until MBFD supplies a verified value. */
-  verifiedLengthFt: null
+  model: ApparatusModelId
 }
 
+const art = (name: string) => `/scenario-assets/seed/apparatus/${name}.webp`
+
 export const apparatusCatalog: readonly ApparatusTemplate[] = [
-  { id: 'E1', designation: 'Engine 1', kind: 'engine', assetPath: '/scenario-assets/seed/apparatus/E1.webp', imageAspect: 368 / 1402, defaultLengthWorld: 74, verifiedLengthFt: null },
-  { id: 'E2', designation: 'Engine 2', kind: 'engine', assetPath: '/scenario-assets/seed/apparatus/E2.webp', imageAspect: 371 / 1394, defaultLengthWorld: 74, verifiedLengthFt: null },
-  { id: 'E3', designation: 'Engine 3', kind: 'engine', assetPath: '/scenario-assets/seed/apparatus/E3.webp', imageAspect: 366 / 1406, defaultLengthWorld: 74, verifiedLengthFt: null },
-  { id: 'E4', designation: 'Engine 4', kind: 'engine', assetPath: '/scenario-assets/seed/apparatus/E4.webp', imageAspect: 368 / 1405, defaultLengthWorld: 74, verifiedLengthFt: null },
-  { id: 'L1', designation: 'Ladder 1', kind: 'aerial', assetPath: '/scenario-assets/seed/apparatus/L1.webp', imageAspect: 362 / 1516, defaultLengthWorld: 104, verifiedLengthFt: null },
-  { id: 'L3', designation: 'Ladder 3', kind: 'aerial', assetPath: '/scenario-assets/seed/apparatus/L3.webp', imageAspect: 342 / 1481, defaultLengthWorld: 104, verifiedLengthFt: null },
+  { id: 'E1', designation: 'Engine 1', kind: 'engine', assetPath: art('E1'), imageAspect: 368 / 1402, model: 'pierce-puc' },
+  { id: 'E2', designation: 'Engine 2', kind: 'engine', assetPath: art('E2'), imageAspect: 371 / 1394, model: 'pierce-puc' },
+  { id: 'E3', designation: 'Engine 3', kind: 'engine', assetPath: art('E3'), imageAspect: 366 / 1406, model: 'pierce-puc' },
+  { id: 'E4', designation: 'Engine 4', kind: 'engine', assetPath: art('E4'), imageAspect: 368 / 1405, model: 'pierce-puc' },
+  { id: 'L1', designation: 'Ladder 1', kind: 'aerial', assetPath: art('L1'), imageAspect: 362 / 1516, model: 'pierce-ascendant' },
+  { id: 'L3', designation: 'Ladder 3', kind: 'aerial', assetPath: art('L3'), imageAspect: 342 / 1481, model: 'pierce-arrow-xt' },
+  { id: 'R1', designation: 'Rescue 1', kind: 'rescue', assetPath: art('Rescue'), imageAspect: 302 / 1000, model: 'horton-rescue' },
+  { id: 'R2', designation: 'Rescue 2', kind: 'rescue', assetPath: art('Rescue'), imageAspect: 302 / 1000, model: 'horton-rescue' },
+  { id: 'R3', designation: 'Rescue 3', kind: 'rescue', assetPath: art('Rescue'), imageAspect: 302 / 1000, model: 'horton-rescue' },
+  { id: 'R4', designation: 'Rescue 4', kind: 'rescue', assetPath: art('Rescue'), imageAspect: 302 / 1000, model: 'horton-rescue' },
 ]
 
 export const apparatusTemplateIds = apparatusCatalog.map((template) => template.id)
@@ -70,7 +93,7 @@ export const hoseCatalog: Record<HoseType, HoseTypeDefinition> = {
   supply5: { id: 'supply5', label: '5″ supply line', shortLabel: '5″', portSize: 'storz-5', defaultPurpose: 'supply', color: '#f6c633', width: 8 },
 }
 
-export type EvolutionId = 'forward-lay' | 'reverse-lay' | 'jumpline' | 'skid-load' | 'high-rise-pack'
+export type EvolutionId = 'forward-lay' | 'reverse-lay' | 'jumpline' | 'trashline' | 'skid-load' | 'high-rise-pack'
 
 export interface EvolutionDefinition {
   id: EvolutionId
@@ -79,25 +102,29 @@ export interface EvolutionDefinition {
 }
 
 export const evolutionCatalog: readonly EvolutionDefinition[] = [
-  { id: 'forward-lay', label: 'Forward lay', summary: '5″ supply laid from a hydrant to the engine intake' },
-  { id: 'reverse-lay', label: 'Reverse lay', summary: '5″ supply laid from the engine intake to a hydrant' },
-  { id: 'jumpline', label: 'Jumpline', summary: '1¾″ attack line from a discharge, finished with a nozzle' },
-  { id: 'skid-load', label: 'Skid load', summary: '3″ feeder to a gated wye, then a 1¾″ attack line' },
-  { id: 'high-rise-pack', label: 'High-rise pack', summary: '1¾″ attack line started at a standpipe or wye' },
+  { id: 'jumpline', label: 'Preconnect / jumpline', summary: '1¾″, two 100′ sections, finished with a nozzle' },
+  { id: 'trashline', label: 'Trash line', summary: '1¾″, 100′ section plus a 50′ roll' },
+  { id: 'high-rise-pack', label: 'High-rise pack', summary: '1¾″, two 100′ packs connected' },
+  { id: 'forward-lay', label: 'Forward lay', summary: '5″ from the hydrant to the engine intake' },
+  { id: 'reverse-lay', label: 'Reverse lay', summary: '5″ from the engine intake to the hydrant' },
+  { id: 'skid-load', label: '3″ to gated wye', summary: '3″ line to a gated wye, then a 1¾″ attack line' },
 ]
 
-/**
- * Load lengths and section lengths carried over from the V2 simulator. They
- * are editable per scenario and always shown as "configured", never verified.
- */
+/** MBFD hose: section lengths and what each apparatus carries. */
 export interface HoseLoadSettings {
   sectionLengthFt: Record<HoseType, number>
   loadLengthFt: Record<EvolutionId | 'skid-load-attack', number>
 }
 
 export const defaultHoseLoads: HoseLoadSettings = {
+  sectionLengthFt: { attack175: 100, hose3: 50, supply5: 100 },
+  loadLengthFt: { 'forward-lay': 800, 'reverse-lay': 800, jumpline: 200, trashline: 150, 'skid-load': 800, 'skid-load-attack': 200, 'high-rise-pack': 200 },
+}
+
+/** The V2 defaults, used only to recognise boards that never had MBFD values. */
+export const legacyHoseLoads: HoseLoadSettings = {
   sectionLengthFt: { attack175: 100, hose3: 100, supply5: 100 },
-  loadLengthFt: { 'forward-lay': 500, 'reverse-lay': 500, jumpline: 100, 'skid-load': 300, 'skid-load-attack': 200, 'high-rise-pack': 200 },
+  loadLengthFt: { 'forward-lay': 500, 'reverse-lay': 500, jumpline: 100, trashline: 150, 'skid-load': 300, 'skid-load-attack': 200, 'high-rise-pack': 200 },
 }
 
 export type MarkerType =

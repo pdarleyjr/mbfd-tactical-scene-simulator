@@ -179,6 +179,26 @@ describe('reconcileHoses', () => {
   it('uses the scene context to place to-scale ports', () => {
     const context = { calibration: { feetPerWorldUnit: 0.5, a: { x: 0, y: 0 }, b: { x: 1, y: 0 }, distanceFt: 0.5, reference: '', calibratedAt: '' }, apparatusLengthFt: { E1: 40 } }
     const reconciled = reconcileHoses([h1, e1, supply], context)[2] as HoseObject
-    expect(reconciled.points.slice(-2)).toEqual([200, 38])
+    const intake = portWorldPosition(e1, findPort(e1, 'intake', context)!)
+    expect(reconciled.points.at(-2)).toBeCloseTo(intake.x, 6)
+    expect(reconciled.points.at(-1)).toBeCloseTo(intake.y, 6)
+    expect(intake.y).toBeCloseTo(-40 + 13 * 2, 6)
+  })
+})
+
+describe('findSnapTarget body taps', () => {
+  const engine: ApparatusObject = { id: 'eng', type: 'apparatus', templateId: 'E1', label: 'E1', assignment: '', x: 500, y: 500, rotation: 0, locked: false }
+  const rescue: ApparatusObject = { id: 'res', type: 'apparatus', templateId: 'R1', label: 'R1', assignment: '', x: 700, y: 500, rotation: 0, locked: false }
+
+  it('snaps a tap anywhere on a truck to its fitting port', () => {
+    const supply = findSnapTarget([engine], { hoseType: 'supply5', point: { x: 500, y: 500 }, radius: 1, bodyMargin: 2 })
+    expect(supply).toMatchObject({ objectId: 'eng', portId: 'intake' })
+    const attack = findSnapTarget([engine], { hoseType: 'attack175', point: { x: 500, y: 500 }, radius: 1, bodyMargin: 2 })
+    expect(attack?.portId).toMatch(/^discharge-1\.5/)
+  })
+
+  it('ignores body taps unless asked, and on trucks without a pump', () => {
+    expect(findSnapTarget([engine], { hoseType: 'supply5', point: { x: 500, y: 500 }, radius: 1 })).toBeUndefined()
+    expect(findSnapTarget([rescue], { hoseType: 'supply5', point: { x: 700, y: 500 }, radius: 1, bodyMargin: 2 })).toBeUndefined()
   })
 })

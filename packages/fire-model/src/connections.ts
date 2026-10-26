@@ -1,6 +1,6 @@
 import { hoseCatalog, type HoseObject, type HoseType, type PortDefinition, type PortDirection, type PortRef, type SceneObject } from '@mbfd/domain'
 import { distance, reversePoints, type Vec } from './geometry.js'
-import { portsFor, portWorldPosition, type SceneContext } from './ports.js'
+import { hitsObject, portsFor, portWorldPosition, type SceneContext } from './ports.js'
 
 export function portKey(reference: PortRef): string {
   return `${reference.objectId}:${reference.portId}`
@@ -44,22 +44,29 @@ export interface SnapRequest {
   otherEndDirection?: PortDirection | undefined
   excludeHoseId?: string | undefined
   accept?: (object: SceneObject, port: PortDefinition) => boolean
+  /** When set, a point on an object's body snaps to its nearest fitting port. */
+  bodyMargin?: number | undefined
 }
 
 export function findSnapTarget(objects: readonly SceneObject[], request: SnapRequest): SnapTarget | undefined {
   const occupied = occupiedPorts(objects, request.excludeHoseId)
   let best: SnapTarget | undefined
+  let onBody: SnapTarget | undefined
   for (const object of objects) {
+    const body = request.bodyMargin !== undefined && hitsObject(object, request.point, request.context ?? {}, request.bodyMargin)
     for (const port of portsFor(object, request.context)) {
       if (occupied.has(`${object.id}:${port.id}`)) continue
       if (!canAttach(request.hoseType, port, request.otherEndDirection)) continue
       if (request.accept && !request.accept(object, port)) continue
       const position = portWorldPosition(object, port)
       const gap = distance(position, request.point)
-      if (gap <= request.radius && (!best || gap < best.distance)) best = { objectId: object.id, portId: port.id, port, object, ...position, distance: gap }
+      const target = { objectId: object.id, portId: port.id, port, object, ...position, distance: gap }
+      if (gap <= request.radius && (!best || gap < best.distance)) best = target
+      // Tapping anywhere on a truck or hydrant means "connect here": take its nearest fitting port.
+      if (body && (!onBody || gap < onBody.distance)) onBody = target
     }
   }
-  return best
+  return best ?? onBody
 }
 
 /** Every unoccupied port a given hose end could attach to, for highlighting. */

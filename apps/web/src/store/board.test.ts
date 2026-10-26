@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HoseObject, SceneObject } from '@mbfd/domain'
-import { createApparatus, createNote, translateObject } from '@mbfd/fire-model'
+import { createApparatus, createNote, findPort, portWorldPosition, translateObject } from '@mbfd/fire-model'
 import { boardFromTemplate } from '../templates'
 import { elapsedMs, pauseStaleClock, sceneContext, useBoard } from './board'
 
@@ -40,7 +40,8 @@ describe('elapsedMs and sceneContext', () => {
 
   it('exposes calibration and vehicle lengths from the scenario', () => {
     const { scenario } = store().board
-    expect(sceneContext({ ...scenario, apparatusLengthFt: { E1: 38 } })).toEqual({ calibration: undefined, apparatusLengthFt: { E1: 38 } })
+    expect(sceneContext({ ...scenario, apparatusLengthFt: { E1: 38 } })).toEqual({ calibration: scenario.calibration, apparatusLengthFt: { E1: 38 } })
+    expect(scenario.calibration?.reference).toContain('Tennis court')
   })
 })
 
@@ -232,15 +233,19 @@ describe('board and scenario edits', () => {
     const hydrant = objects()[0]!
     const supply: HoseObject = { id: 'supply', type: 'hose', hoseType: 'supply5', purpose: 'supply', points: [0, 0, 1, 1], from: { objectId: hydrant.id, portId: 'storz' }, to: { objectId: engine.id, portId: 'intake' }, label: '', locked: false }
     store().commit((current) => [...current, engine, supply], 'Lay supply')
+    const intakeAt = () => { const board = store().board; const unit = board.objects.find((object) => object.id === engine.id)!; return portWorldPosition(unit, findPort(unit, 'intake', sceneContext(board.scenario))!) }
     const endBefore = (objects().find((object) => object.id === 'supply') as HoseObject).points.slice(-2)
-    expect(endBefore).toEqual([400, 435])
+    expect(endBefore[0]).toBeCloseTo(intakeAt().x, 6)
+    expect(endBefore[1]).toBeCloseTo(intakeAt().y, 6)
     store().updateScenario((scenario) => ({
       ...scenario,
       calibration: { feetPerWorldUnit: 0.5, a: { x: 0, y: 0 }, b: { x: 10, y: 0 }, distanceFt: 5, reference: '', calibratedAt: START.toISOString() },
       apparatusLengthFt: { E1: 40 },
     }))
     const endAfter = (objects().find((object) => object.id === 'supply') as HoseObject).points.slice(-2)
-    expect(endAfter).toEqual([400, 438])
+    expect(endAfter[0]).toBeCloseTo(intakeAt().x, 6)
+    expect(endAfter[1]).toBeCloseTo(intakeAt().y, 6)
+    expect(endAfter[1]).not.toBeCloseTo(endBefore[1]!, 3)
   })
 
   it('updates training notes', () => {

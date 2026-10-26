@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { apparatusTemplateIds, defaultHoseLoads, markerCatalog, type ApparatusTemplateId, type MarkerType } from './catalog.js'
+import { apparatusModelIds, apparatusTemplateIds, defaultHoseLoads, legacyHoseLoads, markerCatalog, type ApparatusModelId, type ApparatusTemplateId, type MarkerType } from './catalog.js'
 
 export const SCENE_SCHEMA_VERSION = 3
 
@@ -27,12 +27,14 @@ const templateIdSchema = z.enum(apparatusTemplateIds as [ApparatusTemplateId, ..
 const markerTypeSchema = z.enum(markerCatalog.map((marker) => marker.id) as [MarkerType, ...MarkerType[]])
 export const hoseTypeSchema = z.enum(['attack175', 'hose3', 'supply5'])
 export const hosePurposeSchema = z.enum(['attack', 'feeder', 'supply'])
-export const evolutionIdSchema = z.enum(['forward-lay', 'reverse-lay', 'jumpline', 'skid-load', 'high-rise-pack'])
+export const evolutionIdSchema = z.enum(['forward-lay', 'reverse-lay', 'jumpline', 'trashline', 'skid-load', 'high-rise-pack'])
 
 export const apparatusObjectSchema = z.object({
   ...placedShape,
   type: z.literal('apparatus'),
   templateId: templateIdSchema,
+  /** Overrides the template's default model, e.g. a spare aerial. */
+  modelId: z.enum(apparatusModelIds as [ApparatusModelId, ...ApparatusModelId[]]).optional(),
   label: z.string().trim().min(1).max(24),
   assignment: z.string().trim().max(60).default(''),
 })
@@ -163,6 +165,7 @@ export const hoseLoadsSchema = z.object({
     'skid-load': z.number().positive().max(10_000),
     'skid-load-attack': z.number().positive().max(10_000),
     'high-rise-pack': z.number().positive().max(10_000),
+    trashline: z.number().positive().max(10_000).default(defaultHoseLoads.loadLengthFt.trashline),
   }),
 })
 
@@ -351,4 +354,28 @@ export function salvageObjects(input: unknown): { objects: SceneObject[]; droppe
     else dropped += 1
   }
   return { objects, dropped }
+}
+
+function sameLoads(a: HoseLoads, b: HoseLoads): boolean {
+  return JSON.stringify(a.sectionLengthFt) === JSON.stringify(b.sectionLengthFt)
+    && Object.entries(b.loadLengthFt).every(([key, value]) => a.loadLengthFt[key as keyof HoseLoads['loadLengthFt']] === value)
+}
+
+/**
+ * Brings boards saved before MBFD supplied its hose figures up to date. A
+ * board still on the untouched V2 defaults gets the MBFD loads; anything the
+ * operator changed is left alone.
+ */
+export function upgradeBoard(board: Board, options: { calibration?: Calibration | undefined; templateBackground?: string | undefined } = {}): { board: Board; changed: boolean } {
+  let scenario = board.scenario
+  let changed = false
+  if (sameLoads(scenario.hoseLoads, legacyHoseLoads)) {
+    scenario = { ...scenario, hoseLoads: structuredClone(defaultHoseLoads) }
+    changed = true
+  }
+  if (!scenario.calibration && options.calibration && scenario.background.kind === 'builtin' && scenario.background.url === options.templateBackground) {
+    scenario = { ...scenario, calibration: options.calibration }
+    changed = true
+  }
+  return changed ? { board: { ...board, scenario }, changed } : { board, changed }
 }

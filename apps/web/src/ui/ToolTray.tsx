@@ -1,7 +1,8 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Crosshair } from 'lucide-react'
-import { apparatusCatalog, evolutionCatalog, hoseCatalog, markerCatalog, type ApparatusTemplate, type HoseType } from '@mbfd/domain'
+import { apparatusCatalog, apparatusModels, hoseCatalog, markerCatalog, type ApparatusTemplate, type EvolutionId, type HoseType } from '@mbfd/domain'
 import { useBoard } from '../store/board'
+import { canvasApi } from '../canvas/api'
 import { useUi, type HoseChoice } from '../store/ui'
 import { Segmented } from './primitives'
 
@@ -38,30 +39,43 @@ const facings = [
   { rotation: 270, label: 'Facing left', icon: <ArrowLeft size={16} /> },
 ]
 
+
+const unitGroups: Array<{ title: string; kind: ApparatusTemplate['kind'] }> = [
+  { title: 'Engines', kind: 'engine' },
+  { title: 'Ladders', kind: 'aerial' },
+  { title: 'Rescues', kind: 'rescue' },
+]
+
 function ApparatusTray() {
   const armed = useUi((state) => state.apparatusTemplate)
   const lastRotation = useUi((state) => state.lastRotation)
-  const counts = useBoard((state) => {
-    const tally: Record<string, number> = {}
-    for (const object of state.board.objects) if (object.type === 'apparatus') tally[object.templateId] = (tally[object.templateId] ?? 0) + 1
-    return JSON.stringify(tally)
-  })
-  const tally = JSON.parse(counts) as Record<string, number>
+  const onScene = useBoard((state) => state.board.objects.filter((object) => object.type === 'apparatus').map((object) => object.type === 'apparatus' ? object.templateId : '').join(','))
+  const placed = new Set(onScene.split(',').filter(Boolean))
   const facing = armed ? (lastRotation[armed] ?? 0) : 0
+  const armedTemplate = apparatusCatalog.find((template) => template.id === armed)
   function setFacing(rotation: number) {
     const ui = useUi.getState()
     for (const template of apparatusCatalog) ui.rememberRotation(template.id, rotation)
   }
   return (
-    <Tray title="Apparatus" hint={armed ? `Tap the map to place ${armed}. Keep tapping for more copies.` : 'Tap a unit, then tap the map. Or drag a unit onto the map.'} testId="apparatus-tray">
-      <div className="unit-grid">
-        {apparatusCatalog.map((template) => (
-          <UnitCard key={template.id} template={template} armed={armed === template.id} count={tally[template.id] ?? 0} />
-        ))}
-      </div>
+    <Tray
+      title="Apparatus"
+      hint={armedTemplate ? `Tap the map where ${armedTemplate.designation} goes.` : 'Tap a unit, then tap where it goes. Each unit goes on the scene once; tap a placed unit to select it.'}
+      testId="apparatus-tray"
+    >
+      {unitGroups.map((group) => (
+        <section key={group.kind} className="unit-group">
+          <h3 className="tray__subhead">{group.title}</h3>
+          <div className="unit-grid">
+            {apparatusCatalog.filter((template) => template.kind === group.kind).map((template) => (
+              <UnitCard key={template.id} template={template} armed={armed === template.id} placed={placed.has(template.id)} />
+            ))}
+          </div>
+        </section>
+      ))}
       <div className="tray__row">
-        <span className="tray__label">New units face</span>
-        <div className="facing" role="radiogroup" aria-label="Direction new units face">
+        <span className="tray__label">Units face</span>
+        <div className="facing" role="radiogroup" aria-label="Direction a newly placed unit faces">
           {facings.map((option) => (
             <button key={option.rotation} type="button" role="radio" aria-checked={Math.round(facing) === option.rotation} aria-label={option.label} title={option.label} className={Math.round(facing) === option.rotation ? 'is-active' : ''} onClick={() => setFacing(option.rotation)}>
               {option.icon}
@@ -73,16 +87,31 @@ function ApparatusTray() {
   )
 }
 
-function UnitCard({ template, armed, count }: { template: ApparatusTemplate; armed: boolean; count: number }) {
+/** Selects a unit that is already on the scene and brings it into view. */
+function showPlaced(templateId: string) {
+  const unit = useBoard.getState().board.objects.find((object) => object.type === 'apparatus' && object.templateId === templateId)
+  if (!unit || unit.type !== 'apparatus') return
+  const ui = useUi.getState()
+  ui.setTool('select')
+  ui.select([unit.id])
+  canvasApi.current?.centerOn(unit)
+}
+
+function UnitCard({ template, armed, placed }: { template: ApparatusTemplate; armed: boolean; placed: boolean }) {
   const start = useRef<{ x: number; y: number; id: number } | null>(null)
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
+  const model = apparatusModels[template.model]
+  function activate() {
+    if (placed) showPlaced(template.id)
+    else useUi.getState().armApparatus(armed ? null : template.id)
+  }
   function onPointerDown(event: ReactPointerEvent<HTMLButtonElement>) {
     start.current = { x: event.clientX, y: event.clientY, id: event.pointerId }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
   function onPointerMove(event: ReactPointerEvent<HTMLButtonElement>) {
     const origin = start.current
-    if (!origin || origin.id !== event.pointerId) return
+    if (!origin || origin.id !== event.pointerId || placed) return
     if (!ghost && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) < 8) return
     setGhost({ x: event.clientX, y: event.clientY })
   }
@@ -95,32 +124,27 @@ function UnitCard({ template, armed, count }: { template: ApparatusTemplate; arm
       document.querySelector('[data-testid="scene-canvas"]')?.dispatchEvent(new CustomEvent('apparatus-drop', { detail: { templateId: template.id, clientX: event.clientX, clientY: event.clientY } }))
       return
     }
-    useUi.getState().armApparatus(armed ? null : template.id)
+    activate()
   }
   return (
     <>
       <button
         type="button"
-        className={`unit-card ${armed ? 'is-armed' : ''}`}
+        className={`unit-card ${armed ? 'is-armed' : ''} ${placed ? 'is-placed' : ''}`}
         aria-pressed={armed}
-        aria-label={`${template.designation}${armed ? ', ready to place' : ''}`}
+        aria-label={`${template.designation}, ${model.label}${placed ? ', on scene: select it' : armed ? ', ready to place' : ''}`}
+        title={`${template.designation}: ${model.label}, ${formatFeetInches(model.lengthFt)}`}
         data-unit={template.id}
+        data-placed={placed || undefined}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={() => { start.current = null; setGhost(null) }}
-        onClick={(event) => { if (event.detail === 0) useUi.getState().armApparatus(armed ? null : template.id) }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && armed) {
-            event.preventDefault()
-            document.querySelector('[data-testid="scene-canvas"]')?.dispatchEvent(new CustomEvent('apparatus-drop-center', { detail: { templateId: template.id } }))
-          }
-        }}
+        onClick={(event) => { if (event.detail === 0) activate() }}
       >
         <span className="unit-card__art"><img src={template.assetPath} alt="" draggable={false} /></span>
         <span className="unit-card__id">{template.id}</span>
-        <span className="unit-card__kind">{template.kind === 'engine' ? 'Engine' : 'Ladder'}</span>
-        {count > 0 && <span className="unit-card__count" aria-label={`${count} on scene`}>{count}</span>}
+        <span className="unit-card__kind">{placed ? 'On scene' : formatFeetInches(model.lengthFt)}</span>
       </button>
       {ghost && (
         <div className="drag-ghost" style={{ left: ghost.x, top: ghost.y }} aria-hidden>
@@ -131,58 +155,75 @@ function UnitCard({ template, armed, count }: { template: ApparatusTemplate; arm
   )
 }
 
-const hoseOrder: HoseType[] = ['attack175', 'hose3', 'supply5']
+function formatFeetInches(feet: number) {
+  const whole = Math.floor(feet + 1e-6)
+  const inches = Math.round((feet - whole) * 12)
+  return inches ? `${whole}′ ${inches}″` : `${whole}′`
+}
+
+const plainLines: HoseType[] = ['attack175', 'hose3', 'supply5']
+
+interface LineOption {
+  id: EvolutionId
+  title: string
+  detail: (loads: { loadLengthFt: Record<string, number> }) => string
+  nozzle?: boolean
+}
+
+const attackOptions: LineOption[] = [
+  { id: 'jumpline', title: 'Preconnect / jumpline', detail: (loads) => `1¾″, ${loads.loadLengthFt.jumpline}′ (two 100′ sections)`, nozzle: true },
+  { id: 'trashline', title: 'Trash line', detail: (loads) => `1¾″, 100′ + 50′ roll (${loads.loadLengthFt.trashline}′)`, nozzle: true },
+  { id: 'high-rise-pack', title: 'High-rise pack', detail: (loads) => `1¾″, two 100′ packs (${loads.loadLengthFt['high-rise-pack']}′)`, nozzle: true },
+]
+
+const supplyOptions: LineOption[] = [
+  { id: 'forward-lay', title: '5″ supply line', detail: (loads) => `Start at a hydrant (forward lay) or an engine (reverse lay). ${loads.loadLengthFt['forward-lay']}′ bed, 100′ sections` },
+  { id: 'skid-load', title: '3″ line to gated wye', detail: (loads) => `50′ sections, ${loads.loadLengthFt['skid-load']}′ per side, then a 1¾″ attack line`, nozzle: true },
+]
 
 function HoseTray() {
   const choice = useUi((state) => state.hoseChoice)
   const loads = useBoard((state) => state.board.scenario.hoseLoads)
-  const calibrated = useBoard((state) => Boolean(state.board.scenario.calibration))
   const setChoice = useUi((state) => state.setHoseChoice)
-  const evolution = choice.kind === 'evolution' ? choice.evolutionId : null
-  const loadFor = (id: string) => id === 'skid-load' ? `${loads.loadLengthFt['skid-load']} + ${loads.loadLengthFt['skid-load-attack']} ft` : `${loads.loadLengthFt[id as keyof typeof loads.loadLengthFt]} ft`
+  const selected = choice.kind === 'evolution' ? choice.evolutionId : null
+  const nozzle = choice.kind === 'evolution' ? choice.nozzle : 'fog'
+  const option = (item: LineOption) => (
+    <button key={item.id} type="button" className={`evolution-option ${selected === item.id ? 'is-active' : ''}`} aria-pressed={selected === item.id} data-evolution={item.id} onClick={() => setChoice({ kind: 'evolution', evolutionId: item.id, nozzle })}>
+      <span className="evolution-option__name">{item.title}</span>
+      <span className="evolution-option__summary">{item.detail(loads)}</span>
+    </button>
+  )
+  const needsNozzle = [...attackOptions, ...supplyOptions].find((item) => item.id === selected)?.nozzle
   return (
-    <Tray title="Hose" hint="Tap points along the route, or drag a finger along it. End on a port to connect." testId="hose-tray">
-      <h3 className="tray__subhead">Lines</h3>
-      <div className="hose-list">
-        {hoseOrder.map((type) => {
+    <Tray title="Hose" hint="Tap the engine (or hydrant) the line starts from, tap along the route, then tap where it ends. Trucks do not move while you lay hose." testId="hose-tray">
+      <h3 className="tray__subhead">Fire attack</h3>
+      <div className="evolution-list">{attackOptions.map(option)}</div>
+      <h3 className="tray__subhead">Water supply</h3>
+      <div className="evolution-list">{supplyOptions.map(option)}</div>
+      {needsNozzle && (
+        <div className="tray__row">
+          <span className="tray__label">Nozzle</span>
+          <Segmented size="sm" label="Nozzle type" value={nozzle} options={[{ value: 'fog', label: 'Fog' }, { value: 'smooth-bore', label: 'Smooth bore' }]} onChange={(next) => setChoice({ ...choice, nozzle: next } as HoseChoice)} />
+        </div>
+      )}
+      <h3 className="tray__subhead">Plain line (no packaged load)</h3>
+      <div className="plain-lines">
+        {plainLines.map((type) => {
           const definition = hoseCatalog[type]
           const active = choice.kind === 'free' && choice.hoseType === type
           return (
-            <button key={type} type="button" className={`hose-option ${active ? 'is-active' : ''}`} aria-pressed={active} data-hose={type} onClick={() => setChoice({ kind: 'free', hoseType: type, purpose: choice.kind === 'free' && choice.hoseType === type ? choice.purpose : definition.defaultPurpose })}>
+            <button key={type} type="button" className={`hose-option ${active ? 'is-active' : ''}`} aria-pressed={active} data-hose={type} onClick={() => setChoice({ kind: 'free', hoseType: type, purpose: definition.defaultPurpose })}>
               <span className="hose-option__swatch" style={{ background: definition.color, height: definition.width + 2 }} aria-hidden />
-              <span className="hose-option__label">{definition.label}</span>
+              <span className="hose-option__label">{definition.shortLabel}</span>
             </button>
           )
         })}
       </div>
-      {choice.kind === 'free' && choice.hoseType === 'hose3' && (
-        <div className="tray__row">
-          <span className="tray__label">Use as</span>
-          <Segmented size="sm" label="3-inch line purpose" value={choice.purpose === 'attack' ? 'attack' : 'feeder'} options={[{ value: 'feeder', label: 'Feeder' }, { value: 'attack', label: 'Attack' }]} onChange={(purpose) => setChoice({ ...choice, purpose })} />
-        </div>
-      )}
-      <h3 className="tray__subhead">Evolutions</h3>
-      <div className="evolution-list">
-        {evolutionCatalog.map((item) => {
-          const active = evolution === item.id
-          return (
-            <button key={item.id} type="button" className={`evolution-option ${active ? 'is-active' : ''}`} aria-pressed={active} data-evolution={item.id} onClick={() => setChoice({ kind: 'evolution', evolutionId: item.id, nozzle: choice.kind === 'evolution' ? choice.nozzle : 'fog' })}>
-              <span className="evolution-option__name">{item.label}<small>{loadFor(item.id)}</small></span>
-              <span className="evolution-option__summary">{item.summary}</span>
-            </button>
-          )
-        })}
-      </div>
-      {choice.kind === 'evolution' && ['jumpline', 'skid-load', 'high-rise-pack'].includes(choice.evolutionId) && (
-        <div className="tray__row">
-          <span className="tray__label">Nozzle</span>
-          <Segmented size="sm" label="Nozzle type" value={choice.nozzle} options={[{ value: 'fog', label: 'Fog' }, { value: 'smooth-bore', label: 'Smooth bore' }]} onChange={(nozzle) => setChoice({ ...choice, nozzle } as HoseChoice)} />
-        </div>
-      )}
-      <p className="tray__note">Load lengths are scenario settings carried over from V2{calibrated ? '' : '. Calibrate the map to compare routes against them'}.</p>
     </Tray>
   )
 }
+
+
 
 function MarkerTray() {
   const markerType = useUi((state) => state.markerType)

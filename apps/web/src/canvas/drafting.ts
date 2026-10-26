@@ -8,8 +8,10 @@ import {
   createWye,
   distance,
   evolutionSteps,
+  apparatusModelFor,
   findPort,
   findSnapTarget,
+  hitsObject,
   headingDegrees,
   newId,
   pointAt,
@@ -29,6 +31,8 @@ import { useUi, type Draft } from '../store/ui'
 
 /** Snap distance in screen pixels; generous for fingers. */
 const SNAP_PX = 30
+/** Extra margin around a truck or hydrant body that still counts as a tap on it. */
+const BODY_PX = 10
 /** Tapping within this distance of the last point finishes the line. */
 const FINISH_PX = 14
 
@@ -77,26 +81,47 @@ export function hoseSnapAt(point: Vec, draft: Draft | null = useUi.getState().dr
     context: sceneContext(board.scenario),
     otherEndDirection: starting ? undefined : portDirection(draft?.from),
     excludeHoseId: draft?.continueHoseId,
+    // Tapping a truck or hydrant anywhere on its body counts as tapping its fitting port.
+    bodyMargin: BODY_PX / scale(),
     ...(starting && step ? { accept: (object: SceneObject, port) => startRuleAccepts(step.start, object, port) } : {}),
   })
+}
+
+/** The truck or hydrant under a point, used to explain why a lay could not start there. */
+function objectUnder(point: Vec): SceneObject | undefined {
+  const { board } = useBoard.getState()
+  const context = sceneContext(board.scenario)
+  return [...board.objects].reverse().find((object) => hitsObject(object, point, context, BODY_PX / scale()))
 }
 
 function startHoseDraft(point: Vec): Draft | undefined {
   const ui = useUi.getState()
   const snap = hoseSnapAt(point, null)
   const spec = currentHoseSpec(null)
-  if (spec.step && spec.step.start !== 'any' && !snap) {
-    ui.toast(spec.step.prompt.start, 'info')
-    return undefined
+  if (!snap) {
+    const under = objectUnder(point)
+    if (under?.type === 'apparatus') {
+      const model = apparatusModelFor(under.templateId, under.modelId)
+      ui.toast(model.pump ? `No free connection on ${under.label} for this line.` : `${under.label} has no pump. Pull lines from an engine or ladder.`, 'warning')
+      return undefined
+    }
+    if (spec.step && spec.step.start !== 'any') {
+      ui.toast(spec.step.prompt.start, 'info')
+      return undefined
+    }
   }
-  const steps = ui.hoseChoice.kind === 'evolution' ? evolutionSteps(ui.hoseChoice.evolutionId, useBoard.getState().board.scenario.hoseLoads) : undefined
+  const loads = useBoard.getState().board.scenario.hoseLoads
+  let evolutionId = ui.hoseChoice.kind === 'evolution' ? ui.hoseChoice.evolutionId : undefined
+  // A supply line started at an engine is a reverse lay; at a hydrant, a forward lay.
+  if (evolutionId === 'forward-lay' && snap?.object.type === 'apparatus') evolutionId = 'reverse-lay'
+  const steps = evolutionId ? evolutionSteps(evolutionId, loads) : undefined
   return {
     kind: 'hose',
     points: snap ? [snap.x, snap.y] : [point.x, point.y],
     from: snap ? { objectId: snap.objectId, portId: snap.portId } : undefined,
     steps,
     stepIndex: steps ? 0 : undefined,
-    evolutionId: ui.hoseChoice.kind === 'evolution' ? ui.hoseChoice.evolutionId : undefined,
+    evolutionId,
   }
 }
 
@@ -272,13 +297,7 @@ export function placeAt(point: Vec) {
   const ui = useUi.getState()
   const board = useBoard.getState()
   const objects = board.board.objects
-  if (ui.tool === 'apparatus' && ui.apparatusTemplate) {
-    const template = findApparatusTemplate(ui.apparatusTemplate)
-    if (!template) return
-    const apparatus = createApparatus(template.id, point, ui.lastRotation[template.id] ?? 0, objects)
-    board.commit([...objects, apparatus], `Place ${apparatus.label}`)
-    return apparatus
-  }
+  if (ui.tool === 'apparatus' && ui.apparatusTemplate) return placeApparatusAt(ui.apparatusTemplate, point)
   if (ui.tool === 'hydrant') {
     const hydrant = createHydrant(point, objects)
     board.commit([...objects, hydrant], `Place hydrant ${hydrant.label}`)
@@ -304,8 +323,18 @@ export function placeApparatusAt(templateId: string, point: Vec) {
   const ui = useUi.getState()
   const board = useBoard.getState()
   const template = findApparatusTemplate(templateId)
-  if (!template) return
+  if (!template) return undefined
+  const existing = board.board.objects.find((object) => object.type === 'apparatus' && object.templateId === template.id)
+  ui.setTool('select')
+  if (existing) {
+    // Each unit is on the scene once: tapping it again selects the one already there.
+    ui.select([existing.id])
+    ui.toast(`${template.designation} is already on the scene. It is selected so you can move it.`, 'info')
+    return existing
+  }
   const apparatus = createApparatus(template.id, point, ui.lastRotation[template.id] ?? 0, board.board.objects)
   board.commit([...board.board.objects, apparatus], `Place ${apparatus.label}`)
-  if (ui.tool === 'select') ui.select([apparatus.id])
+  ui.select([apparatus.id])
+  ui.toast(`${apparatus.label} placed. Drag it to move, use the round handle to rotate.`, 'success')
+  return apparatus
 }

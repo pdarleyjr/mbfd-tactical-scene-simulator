@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { repairBoard, type Board } from '@mbfd/domain'
+import { repairBoard, upgradeBoard, type Board } from '@mbfd/domain'
 import { useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { boardFromScenario, boardFromTemplate, defaultTemplate, findTemplate } from '../templates'
@@ -26,7 +26,12 @@ const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('m
 function restore(raw: unknown): { board: Board; repaired: boolean } | undefined {
   const templateId = raw && typeof raw === 'object' ? (raw as { templateId?: unknown }).templateId : undefined
   const template = findTemplate(typeof templateId === 'string' ? templateId : null) ?? defaultTemplate
-  return repairBoard(raw, template.scenario)
+  const restored = repairBoard(raw, template.scenario)
+  if (!restored) return undefined
+  // Boards saved before MBFD supplied hose loads and the map scale pick them up here.
+  const background = template.scenario.background
+  const upgraded = upgradeBoard(restored.board, { calibration: template.scenario.calibration, templateBackground: background.kind === 'builtin' ? background.url : undefined })
+  return { board: upgraded.board, repaired: restored.repaired }
 }
 
 /** Keeps an untouched copy of a record before a repaired version replaces it. */

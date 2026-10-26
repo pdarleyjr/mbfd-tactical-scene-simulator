@@ -1,6 +1,7 @@
-import { useMemo, type ReactNode } from 'react'
-import { ArrowDownToLine, ArrowUpToLine, Copy, Lock, LockOpen, RotateCcw, RotateCw, Spline, Trash2, Unlink, X } from 'lucide-react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, ArrowUpToLine, Copy, Lock, LockOpen, RotateCcw, RotateCw, Spline, Trash2, Unlink, X } from 'lucide-react'
 import {
+  apparatusModels,
   findApparatusTemplate,
   hoseCatalog,
   markerCatalog,
@@ -16,11 +17,11 @@ import {
   type NozzleObject,
   type SceneObject,
 } from '@mbfd/domain'
-import { apparatusSize, describeHose, objectName, polylineLength, portsFor, readHose, readLength, type WaterSupplyReport } from '@mbfd/fire-model'
+import { apparatusModelFor, apparatusSize, describeHose, objectName, polylineLength, portsFor, readHose, readLength, type WaterSupplyReport } from '@mbfd/fire-model'
 import { sceneContext, useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { useWaterSupply } from '../store/selectors'
-import { deleteSelection, disconnectHoseEnd, duplicateSelection, reorderSelection, setRotation, startEvolutionFrom, toggleLockSelection, updateObject } from '../lib/commands'
+import { deleteSelection, disconnectHoseEnd, duplicateSelection, nudgeObject, reorderSelection, setRotation, startEvolutionFrom, toggleLockSelection, updateObject } from '../lib/commands'
 import { extendHose } from '../canvas/drafting'
 import { Button, CommitText, Field, IconButton, Section, Segmented } from './primitives'
 
@@ -83,14 +84,48 @@ function CommonActions({ object }: { object: SceneObject }) {
 function RotationControl({ object }: { object: ApparatusObject | ApplianceObject | NozzleObject }) {
   const rotation = Math.round(object.rotation)
   return (
-    <Field label="Rotation" hint="Drag the round handle on the map, or use [ and ] (Shift for 1°).">
+    <Field label="Rotation" hint="Or drag the round handle on the map (snaps every 15°; hold Shift for free).">
       {(id) => (
         <div className="rotation">
           <IconButton label="Rotate 15° left" onClick={() => setRotation(object.id, object.rotation - 15)}><RotateCcw size={17} /></IconButton>
-          <div className="rotation__dial" aria-hidden><span style={{ transform: `rotate(${rotation}deg)` }} /></div>
+          <button type="button" className="btn btn--quiet btn--step" aria-label="Rotate 1° left" onClick={() => setRotation(object.id, object.rotation - 1)}>−1°</button>
           <input id={id} className="input input--number" type="number" inputMode="numeric" min={0} max={359} value={rotation} onChange={(event) => setRotation(object.id, Number(event.target.value) || 0)} aria-label="Rotation in degrees" />
-          <span className="unit">°</span>
+          <button type="button" className="btn btn--quiet btn--step" aria-label="Rotate 1° right" onClick={() => setRotation(object.id, object.rotation + 1)}>+1°</button>
           <IconButton label="Rotate 15° right" onClick={() => setRotation(object.id, object.rotation + 15)}><RotateCw size={17} /></IconButton>
+        </div>
+      )}
+    </Field>
+  )
+}
+
+/** Fine positioning without dragging: moves along the map or along the vehicle. */
+function PositionPad({ object, unitsPerFt }: { object: ApparatusObject; unitsPerFt: number }) {
+  const [stepFt, setStepFt] = useState(1)
+  const step = stepFt * unitsPerFt
+  const along = (direction: 1 | -1) => {
+    const radians = object.rotation * Math.PI / 180
+    nudgeObject(object.id, Math.sin(radians) * step * direction, -Math.cos(radians) * step * direction)
+  }
+  return (
+    <Field label="Position" hint="Drag the unit on the map, or nudge it here. Arrow keys also nudge (Shift for 10×).">
+      {() => (
+        <div className="position-pad">
+          <div className="position-pad__grid">
+            <span />
+            <IconButton label={`Move up ${stepFt} ft`} onClick={() => nudgeObject(object.id, 0, -step)}><ArrowUp size={18} /></IconButton>
+            <span />
+            <IconButton label={`Move left ${stepFt} ft`} onClick={() => nudgeObject(object.id, -step, 0)}><ArrowLeft size={18} /></IconButton>
+            <span className="position-pad__dot" aria-hidden />
+            <IconButton label={`Move right ${stepFt} ft`} onClick={() => nudgeObject(object.id, step, 0)}><ArrowRight size={18} /></IconButton>
+            <span />
+            <IconButton label={`Move down ${stepFt} ft`} onClick={() => nudgeObject(object.id, 0, step)}><ArrowDown size={18} /></IconButton>
+            <span />
+          </div>
+          <div className="position-pad__side">
+            <Button onClick={() => along(1)}>Pull forward</Button>
+            <Button onClick={() => along(-1)}>Back up</Button>
+            <Segmented size="sm" label="Nudge distance" value={String(stepFt)} options={[{ value: '1', label: '1 ft' }, { value: '5', label: '5 ft' }]} onChange={(value) => setStepFt(Number(value))} />
+          </div>
         </div>
       )}
     </Field>
@@ -102,22 +137,26 @@ function ApparatusInspector({ object, supply }: { object: ApparatusObject; suppl
   const scenario = useBoard((state) => state.board.scenario)
   const objects = useBoard((state) => state.board.objects)
   const index = useMemo(() => new Map(objects.map((candidate) => [candidate.id, candidate])), [objects])
-  const size = apparatusSize(object.templateId, sceneContext(scenario))
+  const size = apparatusSize(object.templateId, sceneContext(scenario), object.modelId)
+  const model = apparatusModelFor(object.templateId, object.modelId)
   const unit = supply.apparatus.get(object.id)
   const ports = portsFor(object, sceneContext(scenario))
   const hoses = objects.filter((candidate): candidate is HoseObject => candidate.type === 'hose')
   const lineAt = (portId: string) => hoses.find((hose) => (hose.from?.objectId === object.id && hose.from.portId === portId) || (hose.to?.objectId === object.id && hose.to.portId === portId))
-  const isEngine = template?.kind === 'engine'
+  const freePreconnect = ['discharge-1.5', 'discharge-1.5b'].find((portId) => ports.some((port) => port.id === portId) && !lineAt(portId))
   const supplyText = unit?.supplied
     ? `Supplied from ${unit.hydrantIds.map((id) => objectName(index.get(id))).join(', ')}`
     : unit?.outputLineIds.length ? 'Flowing tank water only' : 'No lines in service'
+  const modelOptions = template?.kind === 'rescue' ? (['horton-rescue'] as const) : template?.kind === 'engine' ? (['pierce-puc'] as const) : (['pierce-ascendant', 'pierce-arrow-xt', 'pierce-dash-2000'] as const)
   return (
     <>
       <Header
         art={<img className="inspector__art" src={template?.assetPath} alt="" />}
         title={<CommitText className="input input--title" value={object.label} maxLength={24} required aria-label="Unit label" data-testid="unit-label" onCommit={(label) => updateObject<ApparatusObject>(object.id, { label }, 'Rename unit')} />}
-        subtitle={`${template?.designation ?? object.templateId} artwork${object.label !== object.templateId ? ` · shown as ${object.label}` : ''}`}
+        subtitle={`${template?.designation ?? object.templateId} · ${model.label} · ${Math.round(model.lengthFt * 10) / 10} ft`}
       />
+      <PositionPad object={object} unitsPerFt={size.unitsPerFt} />
+      <RotationControl object={object} />
       <Field label="Assignment" hint="Shown under the unit on the map.">
         {(id) => (
           <>
@@ -126,32 +165,46 @@ function ApparatusInspector({ object, supply }: { object: ApparatusObject; suppl
           </>
         )}
       </Field>
-      <RotationControl object={object} />
+      {modelOptions.length > 1 && (
+        <Field label="Apparatus model" hint="Sets the length and intake position drawn on the map.">
+          {(id) => (
+            <select id={id} className="input" value={model.id} onChange={(event) => updateObject<ApparatusObject>(object.id, { modelId: event.target.value as ApparatusObject['modelId'] }, 'Change apparatus model')} data-testid="apparatus-model">
+              {modelOptions.map((option) => <option key={option} value={option}>{apparatusModels[option].label} ({Math.round(apparatusModels[option].lengthFt * 10) / 10} ft)</option>)}
+            </select>
+          )}
+        </Field>
+      )}
       <Section title="Water">
-        <p className={`status-line status-line--${unit?.supplied ? 'ok' : unit?.outputLineIds.length ? 'info' : 'muted'}`} data-testid="apparatus-supply">{supplyText}</p>
-        <ul className="port-list">
-          {ports.map((port) => {
-            const line = lineAt(port.id)
-            return (
-              <li key={port.id}>
-                <span className="port-list__name">{port.label}</span>
-                <span className="port-list__state">{line ? describeHose(line, index) : 'Open'}</span>
-              </li>
-            )
-          })}
-        </ul>
-        <div className="quick-actions">
-          {isEngine && !lineAt('discharge-1.5') && <Button onClick={() => startEvolutionFrom('jumpline', object.id, 'discharge-1.5')}>Pull jumpline</Button>}
-          {isEngine && !lineAt('discharge-2.5') && <Button onClick={() => startEvolutionFrom('skid-load', object.id, 'discharge-2.5')}>Pull skid load</Button>}
-          {!lineAt('intake') && <Button onClick={() => startEvolutionFrom('reverse-lay', object.id, 'intake')}>Reverse lay from here</Button>}
-          {!isEngine && !lineAt('discharge-1.5') && <Button onClick={() => startEvolutionFrom('high-rise-pack', object.id, 'discharge-1.5')}>Pull attack line</Button>}
-        </div>
-        <p className="fine-print">Connection points are schematic (rear intake, pump-panel discharges), not verified MBFD plumbing.</p>
+        {!model.pump && <p className="status-line status-line--muted">No pump. Hose is pulled from engines and ladders.</p>}
+        {model.pump && <p className={`status-line status-line--${unit?.supplied ? 'ok' : unit?.outputLineIds.length ? 'info' : 'muted'}`} data-testid="apparatus-supply">{supplyText}</p>}
+        {ports.length > 0 && (
+          <ul className="port-list">
+            {ports.map((port) => {
+              const line = lineAt(port.id)
+              return (
+                <li key={port.id}>
+                  <span className="port-list__name">{port.label}</span>
+                  <span className="port-list__state">{line ? describeHose(line, index) : 'Open'}</span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        {model.pump && (
+          <div className="quick-actions">
+            {freePreconnect && <Button onClick={() => startEvolutionFrom('jumpline', object.id, freePreconnect)}>Pull preconnect</Button>}
+            {freePreconnect && template?.kind === 'engine' && <Button onClick={() => startEvolutionFrom('trashline', object.id, freePreconnect)}>Pull trash line</Button>}
+            {!lineAt('intake') && <Button onClick={() => startEvolutionFrom('reverse-lay', object.id, 'intake')}>Reverse lay to hydrant</Button>}
+            {!lineAt('discharge-2.5') && <Button onClick={() => startEvolutionFrom('skid-load', object.id, 'discharge-2.5')}>3″ to gated wye</Button>}
+          </div>
+        )}
+        {model.pump && <p className="fine-print">5″ intake on the driver's side, {model.intakeFromFrontFt} ft from the front bumper. Discharge locations are drawn at the pump panel.</p>}
       </Section>
-      <p className="fine-print">{size.toScale ? `Drawn to scale at the length you entered for ${object.templateId}.` : 'Drawn at a default size, not a verified scale. Enter a verified length in Scenario settings to draw to scale.'}</p>
+      <p className="fine-print">{size.toScale ? `Drawn to scale: ${Math.round(model.lengthFt * 10) / 10} ft long on the calibrated map.` : 'Map not calibrated, so the unit is drawn at an approximate size. Calibrate to draw it to scale.'}</p>
     </>
   )
 }
+
 
 const hoseTypes: Array<{ value: HoseType; label: string }> = [
   { value: 'attack175', label: '1¾″' },

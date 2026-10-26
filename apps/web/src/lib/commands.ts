@@ -25,6 +25,7 @@ export function duplicateSelection(offset = { x: 26, y: 26 }) {
   const selection = objects.filter((object) => ids.has(object.id))
   if (!selection.length) return
   const copies = duplicateObjects(selection, objects, offset)
+  if (!copies.length) { useUi.getState().toast('Each unit can be on the scene only once.', 'info'); return }
   useBoard.getState().commit([...objects, ...copies], copies.length > 1 ? `Duplicate ${copies.length} objects` : 'Duplicate')
   useUi.getState().select(copies.map((copy) => copy.id))
 }
@@ -41,10 +42,16 @@ export function pasteClipboard() {
   if (!clipboard.length) return
   const objects = useBoard.getState().board.objects
   const copies = duplicateObjects(clipboard, objects, { x: 40, y: 40 })
+  if (!copies.length) { useUi.getState().toast('Each unit can be on the scene only once.', 'info'); return }
   clipboard = copies
   useBoard.getState().commit([...objects, ...copies], 'Paste')
   useUi.getState().setTool('select')
   useUi.getState().select(copies.map((copy) => copy.id))
+}
+
+/** Moves one object by a world offset (the inspector's position pad). */
+export function nudgeObject(id: string, dx: number, dy: number) {
+  useBoard.getState().commit((objects) => objects.map((object) => object.id === id && !object.locked ? translateObject(object, dx, dy) : object), 'Nudge')
 }
 
 export function nudgeSelection(dx: number, dy: number) {

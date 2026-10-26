@@ -16,7 +16,9 @@ function hose(id: string, hoseType: HoseObject['hoseType'], purpose: HoseObject[
 
 function boardWith(objects: SceneObject[], patch: (board: Board) => Board = (board) => board): Board {
   const board = boardFromTemplate()
-  return patch({ ...board, objects: [...board.objects, ...objects] })
+  // These cases start from an uncalibrated map; calibration is added per test.
+  const { calibration: _calibration, ...scenario } = board.scenario
+  return patch({ ...board, scenario, objects: [...board.objects, ...objects] })
 }
 
 const supply = hose('supply', 'supply5', 'supply', [0, 0, 250, 0], { from: { objectId: HYDRANT_ID, portId: 'storz' }, to: { objectId: 'e1', portId: 'intake' } }, { loadFt: 200 })
