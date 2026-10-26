@@ -8,6 +8,8 @@ import { boardSchema, runSchema, scenarioSchema, sceneObjectSchema, snapshotSche
  */
 
 export const MAIN_SCENE_ID = 'main'
+/** Most objects a live scene may hold (the same limit the board schema enforces). */
+export const MAX_SCENE_OBJECTS = 5000
 export const sceneIdSchema = z.string().regex(/^[a-z0-9]{4,24}$/, 'Scene ids are 4–24 lowercase letters or digits.')
 
 const idList = z.array(z.string().min(1).max(128)).max(5000)
@@ -29,7 +31,6 @@ export type ScenePatch = z.infer<typeof scenePatchSchema>
 export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hello'), clientId: z.string().min(1).max(64), seed: boardSchema }),
   z.object({ type: z.literal('patch'), id: z.string().min(1).max(64), patch: scenePatchSchema }),
-  z.object({ type: z.literal('replace'), id: z.string().min(1).max(64), board: boardSchema }),
   z.object({ type: z.literal('ping') }),
 ])
 
@@ -41,7 +42,7 @@ export type ServerMessage =
   | { type: 'replace'; from: string; version: number; board: Board }
   | { type: 'ack'; id: string; version: number }
   | { type: 'presence'; peers: number }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; id?: string | undefined }
   | { type: 'pong'; now: number }
 
 export function isEmptyPatch(patch: ScenePatch): boolean {
@@ -111,6 +112,41 @@ export function diffBoards(previous: Board, next: Board): ScenePatch {
     }
   }
   return patch
+}
+
+/**
+ * Someone else's patch, minus whatever this browser has changed but the server
+ * has not applied yet. The server will apply the local changes after the
+ * remote one, so they win there; leaving them out here makes every screen end
+ * up the same.
+ */
+export function withoutPendingChanges(remote: ScenePatch, pending: readonly ScenePatch[]): ScenePatch {
+  const touched = new Set<string>()
+  let order = false
+  let run = false
+  const fields = new Set<'scenario' | 'training' | 'snapshots' | 'name'>()
+  for (const patch of pending) {
+    for (const object of patch.upserts ?? []) touched.add(object.id)
+    for (const id of patch.removes ?? []) touched.add(id)
+    if (patch.order) order = true
+    if (patch.run !== undefined || patch.runAppend?.length) run = true
+    for (const field of ['scenario', 'training', 'snapshots', 'name'] as const) if (patch[field] !== undefined) fields.add(field)
+  }
+  if (!touched.size && !order && !run && !fields.size) return remote
+  const result: ScenePatch = {}
+  const upserts = remote.upserts?.filter((object) => !touched.has(object.id))
+  const removes = remote.removes?.filter((id) => !touched.has(id))
+  if (upserts?.length) result.upserts = upserts
+  if (removes?.length) result.removes = removes
+  if (remote.order && !order) result.order = remote.order
+  if (!run) {
+    if (remote.run !== undefined) result.run = remote.run
+    if (remote.runAppend) result.runAppend = remote.runAppend
+  }
+  for (const field of ['scenario', 'training', 'snapshots', 'name'] as const) {
+    if (remote[field] !== undefined && !fields.has(field)) Object.assign(result, { [field]: remote[field] })
+  }
+  return result
 }
 
 /** Short, unguessable-enough id for a separate scene link. */

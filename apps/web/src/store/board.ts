@@ -77,19 +77,45 @@ export function pauseStaleClock(board: Board): Board {
 export interface HistoryStep {
   undo: SceneDiff
   redo: SceneDiff
+  /** Every object the change touched, as it was before and after (absent = did not exist). */
+  touched: string[]
+  before: SceneObject[]
+  after: SceneObject[]
 }
 
 /** The change from before to after, plus its exact inverse. */
 function historyStep(before: readonly SceneObject[], after: readonly SceneObject[]): HistoryStep {
   const redo = diffObjects(before, after)
   const previous = new Map(before.map((object) => [object.id, object]))
+  const next = new Map(after.map((object) => [object.id, object]))
   const touched = [...redo.upserts.map((object) => object.id), ...redo.removes]
   const undo: SceneDiff = {
     upserts: touched.flatMap((id) => { const object = previous.get(id); return object ? [object] : [] }),
     removes: redo.upserts.filter((object) => !previous.has(object.id)).map((object) => object.id),
     ...(redo.order ? { order: before.map((object) => object.id) } : {}),
   }
-  return { undo, redo }
+  const pick = (from: Map<string, SceneObject>) => touched.flatMap((id) => { const object = from.get(id); return object ? [object] : [] })
+  return { undo, redo, touched, before: pick(previous), after: pick(next) }
+}
+
+function sameObject(a: SceneObject | undefined, b: SceneObject | undefined) {
+  return a === b || (a !== undefined && b !== undefined && JSON.stringify(a) === JSON.stringify(b))
+}
+
+/**
+ * Keeps only the parts of an undo or redo whose objects are still exactly as
+ * this change left them, so it never overwrites or brings back an object
+ * someone else has since changed or deleted.
+ */
+function untouchedSince(diff: SceneDiff, expected: readonly SceneObject[], touched: readonly string[], objects: readonly SceneObject[]): SceneDiff {
+  const current = new Map(objects.map((object) => [object.id, object]))
+  const wanted = new Map(expected.map((object) => [object.id, object]))
+  const ours = new Set(touched.filter((id) => sameObject(current.get(id), wanted.get(id))))
+  return {
+    upserts: diff.upserts.filter((object) => ours.has(object.id)),
+    removes: diff.removes.filter((id) => ours.has(id)),
+    ...(diff.order ? { order: diff.order } : {}),
+  }
 }
 
 function resolve(update: ObjectsUpdate, objects: SceneObject[]): SceneObject[] {
@@ -184,7 +210,7 @@ export const useBoard = create<BoardStore>()((set, get) => ({
     const { board, past, future } = get()
     const step = past.at(-1)
     if (!step) return
-    const objects = reconcileHoses(applyDiff(board.objects, step.undo), sceneContext(board.scenario))
+    const objects = reconcileHoses(applyDiff(board.objects, untouchedSince(step.undo, step.after, step.touched, board.objects)), sceneContext(board.scenario))
     set({ board: withObjects(board, board.objects, objects, 'Undo'), past: past.slice(0, -1), future: [...future, step].slice(-HISTORY_LIMIT), transientBase: null })
   },
 
@@ -192,7 +218,7 @@ export const useBoard = create<BoardStore>()((set, get) => ({
     const { board, past, future } = get()
     const step = future.at(-1)
     if (!step) return
-    const objects = reconcileHoses(applyDiff(board.objects, step.redo), sceneContext(board.scenario))
+    const objects = reconcileHoses(applyDiff(board.objects, untouchedSince(step.redo, step.before, step.touched, board.objects)), sceneContext(board.scenario))
     set({ board: withObjects(board, board.objects, objects, 'Redo'), past: [...past, step].slice(-HISTORY_LIMIT), future: future.slice(0, -1), transientBase: null })
   },
 

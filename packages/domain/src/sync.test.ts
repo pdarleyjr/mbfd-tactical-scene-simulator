@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyScenePatch, clientMessageSchema, diffBoards, isEmptyPatch, newSceneId, sceneIdSchema } from './sync.js'
+import { applyScenePatch, clientMessageSchema, diffBoards, isEmptyPatch, newSceneId, sceneIdSchema, withoutPendingChanges } from './sync.js'
 import type { Board, SceneObject } from './scene.js'
 
 const note = (id: string, x = 0, text = id): SceneObject => ({ id, type: 'note', x, y: 0, rotation: 0, text, locked: false })
@@ -119,8 +119,38 @@ describe('diffBoards', () => {
   })
 })
 
+describe('withoutPendingChanges', () => {
+  it('leaves out objects and fields this browser changed but the server has not applied yet', () => {
+    const remote = { upserts: [note('a', 1), note('b', 1)], removes: ['c', 'd'], order: ['b', 'a'], name: 'Theirs', training: board().training }
+    const result = withoutPendingChanges(remote, [{ upserts: [note('a', 9)] }, { removes: ['c'], name: 'Mine', order: ['a', 'b'] }])
+    expect(result).toEqual({ upserts: [note('b', 1)], removes: ['d'], training: board().training })
+  })
+
+  it('returns the remote patch untouched when nothing is pending', () => {
+    const remote = { upserts: [note('a')] }
+    expect(withoutPendingChanges(remote, [])).toBe(remote)
+    expect(withoutPendingChanges(remote, [{}])).toBe(remote)
+  })
+
+  it('keeps the recorded run whole when this browser is also changing it', () => {
+    const entry = { id: 'e', at: 1, kind: 'change' as const, label: 'x' }
+    expect(withoutPendingChanges({ runAppend: [entry] }, [{ runAppend: [entry] }])).toEqual({})
+    expect(withoutPendingChanges({ runAppend: [entry], run: null }, [{ upserts: [note('z')] }])).toEqual({ runAppend: [entry], run: null })
+  })
+
+  it('makes both screens agree when two people move the same unit at once', () => {
+    const start = board([note('e1', 0)])
+    const mine = { upserts: [note('e1', 10)] }
+    const theirs = { upserts: [note('e1', 20)] }
+    // The server received theirs first, then mine.
+    const server = applyScenePatch(applyScenePatch(start, theirs), mine)
+    const here = applyScenePatch(applyScenePatch(start, mine), withoutPendingChanges(theirs, [mine]))
+    expect(here.objects).toEqual(server.objects)
+  })
+})
 describe('client messages', () => {
-  it('validates the hello, patch, replace, and ping shapes', () => {
+  it('validates the hello, patch, and ping shapes, and has no client replace', () => {
+    expect(clientMessageSchema.safeParse({ type: 'replace', id: '1', board: {} }).success).toBe(false)
     expect(clientMessageSchema.safeParse({ type: 'ping' }).success).toBe(true)
     expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', patch: { removes: ['a'] } }).success).toBe(true)
     expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', patch: { upserts: [{ id: 'x', type: 'bogus' }] } }).success).toBe(false)

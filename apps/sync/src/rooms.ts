@@ -1,4 +1,4 @@
-import { applyScenePatch, isEmptyPatch, sceneIdSchema, type Board, type ScenePatch, type ServerMessage } from '@mbfd/domain'
+import { applyScenePatch, isEmptyPatch, MAX_SCENE_OBJECTS, sceneIdSchema, type Board, type ScenePatch, type ServerMessage } from '@mbfd/domain'
 import type { SceneFiles } from './files.js'
 
 /** A connected browser, reduced to what a room needs. */
@@ -9,11 +9,13 @@ export interface Peer {
 
 export interface RoomTiming {
   saveDelayMs: number
+  /** Continuous editing still saves at least this often. */
+  saveMaxWaitMs?: number
   snapshotEveryMs: number
   idleEvictMs: number
 }
 
-export const defaultTiming: RoomTiming = { saveDelayMs: 600, snapshotEveryMs: 5 * 60_000, idleEvictMs: 10 * 60_000 }
+export const defaultTiming: RoomTiming = { saveDelayMs: 600, saveMaxWaitMs: 5000, snapshotEveryMs: 5 * 60_000, idleEvictMs: 10 * 60_000 }
 
 /**
  * One live scene. The room holds the authoritative board, applies patches in
@@ -23,6 +25,7 @@ export const defaultTiming: RoomTiming = { saveDelayMs: 600, snapshotEveryMs: 5 
 export class Room {
   readonly peers = new Set<Peer>()
   private saveTimer: ReturnType<typeof setTimeout> | undefined
+  private firstUnsavedAt: number | undefined
   private lastSnapshotAt = Date.now()
   private lastSnapshotVersion: number
 
@@ -54,7 +57,12 @@ export class Room {
 
   applyPatch(peer: Peer, opId: string, patch: ScenePatch) {
     if (!isEmptyPatch(patch)) {
-      this.board = applyScenePatch(this.board, patch)
+      const next = applyScenePatch(this.board, patch)
+      if (next.objects.length > MAX_SCENE_OBJECTS) {
+        peer.send({ type: 'error', id: opId, message: `A scene can hold up to ${MAX_SCENE_OBJECTS} objects. That change was not applied.` })
+        return
+      }
+      this.board = next
       this.version += 1
       this.broadcast({ type: 'patch', from: peer.id, version: this.version, patch }, peer)
       this.scheduleSave()
@@ -62,7 +70,7 @@ export class Room {
     peer.send({ type: 'ack', id: opId, version: this.version })
   }
 
-  /** Whole-scene replacement: reset, import, or restoring a saved version. */
+  /** Whole-scene replacement, used when a saved version is restored. */
   async replace(from: string, board: Board, reason: string) {
     await this.snapshotNow(`Before ${reason.toLowerCase()}`)
     this.board = { ...board, id: this.board.id, updatedAt: new Date().toISOString() }
@@ -77,8 +85,11 @@ export class Room {
   }
 
   private scheduleSave() {
+    const now = Date.now()
+    this.firstUnsavedAt ??= now
     if (this.saveTimer) clearTimeout(this.saveTimer)
-    this.saveTimer = setTimeout(() => this.flushSafely(), this.timing.saveDelayMs)
+    const overdue = now - this.firstUnsavedAt >= (this.timing.saveMaxWaitMs ?? Number.POSITIVE_INFINITY)
+    this.saveTimer = setTimeout(() => this.flushSafely(), overdue ? 0 : this.timing.saveDelayMs)
   }
 
   private flushSafely(reason?: string) {
@@ -88,6 +99,7 @@ export class Room {
   /** Saves now, and snapshots when the periodic interval has passed. */
   async flush(snapshotReason?: string) {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined }
+    this.firstUnsavedAt = undefined
     await this.files.save(this.id, this.current)
     const due = Date.now() - this.lastSnapshotAt >= this.timing.snapshotEveryMs
     if (this.version !== this.lastSnapshotVersion && (due || snapshotReason)) await this.snapshotNow(snapshotReason ?? 'Automatic')
@@ -105,7 +117,7 @@ export class RoomManager {
   private readonly loading = new Map<string, Promise<Room>>()
   private readonly idleSince = new Map<string, number>()
 
-  constructor(private readonly files: SceneFiles, private readonly timing: RoomTiming = defaultTiming, private readonly maxScenes = 2000) {}
+  constructor(private readonly files: SceneFiles, private readonly timing: RoomTiming = defaultTiming, private readonly maxScenes = 500) {}
 
   /** Opens a scene, creating it from the visitor's seed the first time. */
   async open(id: string, seed: Board): Promise<Room> {
@@ -136,11 +148,12 @@ export class RoomManager {
       if (room.peers.size) { this.idleSince.delete(id); continue }
       const since = this.idleSince.get(id) ?? now
       this.idleSince.set(id, since)
-      if (now - since >= this.timing.idleEvictMs) {
-        await room.flush()
-        this.rooms.delete(id)
-        this.idleSince.delete(id)
-      }
+      if (now - since < this.timing.idleEvictMs) continue
+      await room.flush()
+      // Someone may have joined while it was saving.
+      if (room.peers.size) { this.idleSince.delete(id); continue }
+      this.rooms.delete(id)
+      this.idleSince.delete(id)
     }
   }
 

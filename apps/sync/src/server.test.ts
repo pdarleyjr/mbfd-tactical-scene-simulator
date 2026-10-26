@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -115,6 +115,20 @@ describe('live rooms', () => {
     expect(saved.version).toBe(1)
   })
 
+  it('still saves during continuous editing', async () => {
+    await sync.close()
+    sync = createSyncServer({ dataDir, timing: { saveDelayMs: 200, saveMaxWaitMs: 300, snapshotEveryMs: 60_000, idleEvictMs: 60_000 } })
+    await new Promise<void>((resolve) => sync.server.listen(0, '127.0.0.1', () => resolve()))
+    base = `http://127.0.0.1:${(sync.server.address() as AddressInfo).port}`
+    const { client } = await join('main', 'one')
+    for (let step = 0; step < 8; step += 1) {
+      client.send({ type: 'patch', id: `p${step}`, patch: { upserts: [note('dragged', step)] } })
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    const saved = JSON.parse(await readFile(path.join(dataDir, 'scenes', 'main', 'current.json'), 'utf8')) as { board: Board }
+    expect(saved.board.objects[0]).toMatchObject({ id: 'dragged' })
+  })
+
   it('keeps separate scenes apart', async () => {
     const { client: main } = await join('main', 'one')
     const { client: other } = await join('abcd2345', 'two')
@@ -151,25 +165,61 @@ describe('live rooms', () => {
     expect((await late.next('error')).message).toMatch(/full/)
   })
 
-  it('snapshots before a replace and when the last person leaves, and restores a version for everyone', async () => {
+  it('snapshots when the last person leaves and before a restore, and restores a version for everyone', async () => {
     const { client: one } = await join('main', 'one', seed([note('original')]))
-    one.send({ type: 'replace', id: 'r1', board: seed([note('imported')]) })
-    expect((await one.next('replace')).board.objects[0]?.id).toBe('imported')
+    one.send({ type: 'patch', id: 'p1', patch: { upserts: [note('added')] } })
+    await one.next('ack')
+    one.close()
+    await new Promise((resolve) => setTimeout(resolve, 150))
     const history = await (await fetch(`${base}/sync-api/scenes/main/history`)).json() as { items: Array<{ name: string; reason: string; objectCount: number }> }
-    expect(history.items[0]).toMatchObject({ reason: 'Before replace', objectCount: 1 })
+    expect(history.items[0]).toMatchObject({ reason: 'Last person left', objectCount: 2 })
 
     const { client: two } = await join('main', 'two')
+    two.send({ type: 'patch', id: 'p2', patch: { removes: ['original', 'added'] } })
+    await two.next('ack')
     const restored = await fetch(`${base}/sync-api/scenes/main/history/${history.items[0]!.name}/restore`, { method: 'POST' })
     expect(restored.status).toBe(200)
-    expect((await two.next('replace')).board.objects[0]?.id).toBe('original')
+    expect((await two.next('replace')).board.objects.map((object) => object.id)).toEqual(['original', 'added'])
+    const after = await (await fetch(`${base}/sync-api/scenes/main/history`)).json() as { items: Array<{ reason: string; objectCount: number }> }
+    expect(after.items[0]).toMatchObject({ reason: 'Before restore', objectCount: 0 })
 
-    one.close()
-    two.close()
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    const after = await (await fetch(`${base}/sync-api/scenes/main/history`)).json() as { items: Array<{ reason: string }> }
-    expect(after.items.map((item) => item.reason)).toContain('Last person left')
+    // Restores are paced so a burst cannot push real history out.
+    const again = await fetch(`${base}/sync-api/scenes/main/history/${history.items[0]!.name}/restore`, { method: 'POST' })
+    expect(again.status).toBe(429)
   })
 
+  it('survives an oversized frame: only that connection closes', async () => {
+    const { client: big } = await join('main', 'big')
+    const closed = new Promise<number>((resolve) => big.ws.once('close', (code) => resolve(code)))
+    big.ws.send('x'.repeat(5 * 1024 * 1024))
+    expect(await closed).toBeGreaterThan(1000)
+    const { state } = await join('main', 'after')
+    expect(state.type).toBe('state')
+  })
+
+  it('refuses a change that would push a scene past the object limit, naming the change', async () => {
+    const { client } = await join('main', 'one')
+    const many = (prefix: string) => Array.from({ length: 2600 }, (_, index) => note(`${prefix}${index}`))
+    client.send({ type: 'patch', id: 'first', patch: { upserts: many('a') } })
+    await client.next('ack', (message) => message.id === 'first')
+    client.send({ type: 'patch', id: 'second', patch: { upserts: many('b') } })
+    const error = await client.next('error')
+    expect(error.id).toBe('second')
+    expect(error.message).toMatch(/up to 5000 objects/)
+    expect(sync.rooms.get('main')?.current.board.objects).toHaveLength(2600)
+  })
+
+  it('limits connections from one address', async () => {
+    await sync.close()
+    sync = createSyncServer({ dataDir, maxConnectionsPerAddress: 2 })
+    await new Promise<void>((resolve) => sync.server.listen(0, '127.0.0.1', () => resolve()))
+    base = `http://127.0.0.1:${(sync.server.address() as AddressInfo).port}`
+    await join('main', 'a')
+    await join('main', 'b')
+    const third = new WebSocket(`ws://127.0.0.1:${new URL(base).port}/sync/main`)
+    const outcome = await new Promise<string>((resolve) => { third.once('open', () => resolve('open')); third.once('error', () => resolve('refused')) })
+    expect(outcome).toBe('refused')
+  })
   it('reloads a saved scene after the server restarts', async () => {
     const { client } = await join('main', 'one')
     client.send({ type: 'patch', id: 'p', patch: { upserts: [note('kept')] } })
@@ -220,6 +270,16 @@ describe('http routes', () => {
 })
 
 describe('scene files', () => {
+  it('sets a damaged scene aside and falls back to its newest snapshot instead of starting over', async () => {
+    const files = new SceneFiles(dataDir)
+    await files.snapshot('abcd', { board: seed([note('from-snapshot')]), version: 4 }, 'Automatic')
+    await files.save('abcd', { board: seed([note('current')]), version: 5 })
+    await writeFile(path.join(dataDir, 'scenes', 'abcd', 'current.json'), '{ not json')
+    const loaded = await files.load('abcd')
+    expect(loaded?.board.objects.map((object) => object.id)).toEqual(['from-snapshot'])
+    const names = await readdir(path.join(dataDir, 'scenes', 'abcd'))
+    expect(names.some((name) => name.startsWith('current.json.damaged-'))).toBe(true)
+  })
   it('keeps at most the newest snapshots and ignores unreadable ones', async () => {
     const files = new SceneFiles(dataDir)
     for (let index = 0; index < HISTORY_LIMIT + 3; index += 1) await files.snapshot('abcd', { board: seed(), version: index }, 'Automatic')

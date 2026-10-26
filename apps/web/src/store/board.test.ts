@@ -76,7 +76,7 @@ describe('commit, undo, and redo', () => {
     const initial = objects()
     const note = addNote()
     expect(objects()).toHaveLength(initial.length + 1)
-    expect(store().past).toEqual([{ undo: { upserts: [], removes: [note.id] }, redo: { upserts: [note], removes: [] } }])
+    expect(store().past).toMatchObject([{ undo: { upserts: [], removes: [note.id] }, redo: { upserts: [note], removes: [] }, touched: [note.id], before: [], after: [note] }])
 
     store().undo()
     expect(objects()).toEqual(initial)
@@ -149,6 +149,22 @@ describe('shared scenes', () => {
     expect(objects().find((object) => object.id === b.id)).toMatchObject({ text: 'edited elsewhere' })
   })
 
+  it('leaves an object alone on undo when someone changed it since', () => {
+    const note = addNote('mine')
+    store().commit((current) => current.map((object) => object.id === note.id ? translateObject(object, 40, 0) : object), 'Move')
+    const moved = objects().find((object) => object.id === note.id)!
+    store().applyRemote({ upserts: [{ ...moved, text: 'renamed elsewhere' } as SceneObject] })
+    store().undo()
+    expect(objects().find((object) => object.id === note.id)).toMatchObject({ x: 140, text: 'renamed elsewhere' })
+  })
+
+  it('never brings back an object someone else deleted', () => {
+    const note = addNote('mine')
+    store().commit((current) => current.map((object) => object.id === note.id ? translateObject(object, 40, 0) : object), 'Move')
+    store().applyRemote({ removes: [note.id] })
+    store().undo()
+    expect(objects().some((object) => object.id === note.id)).toBe(false)
+  })
   it('applies remote changes without recording history and keeps a drag base in step', () => {
     const note = addNote()
     store().beginTransient()

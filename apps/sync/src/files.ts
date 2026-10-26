@@ -26,6 +26,16 @@ export interface HistoryEntry {
   objectCount: number
 }
 
+function parseScene(text: string): StoredScene | undefined {
+  try {
+    const raw = JSON.parse(text) as { board?: unknown; version?: unknown }
+    const board = boardSchema.safeParse(raw.board)
+    return board.success ? { board: board.data, version: typeof raw.version === 'number' ? raw.version : 0 } : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function writeAtomic(file: string, text: string) {
   const temporary = `${file}.${randomUUID()}.tmp`
   await writeFile(temporary, text, 'utf8')
@@ -49,15 +59,36 @@ export class SceneFiles {
     return path.join(this.root, 'scenes', sceneIdSchema.parse(id))
   }
 
+  /**
+   * The saved scene, or undefined when it has never been created. A damaged
+   * file is set aside (never overwritten) and the newest good snapshot is used.
+   */
   async load(id: string): Promise<StoredScene | undefined> {
+    const file = path.join(this.folder(id), 'current.json')
+    let text: string
     try {
-      const raw = JSON.parse(await readFile(path.join(this.folder(id), 'current.json'), 'utf8')) as { board: unknown; version: unknown }
-      const board = boardSchema.safeParse(raw.board)
-      if (!board.success) return undefined
-      return { board: board.data, version: typeof raw.version === 'number' ? raw.version : 0 }
-    } catch {
-      return undefined
+      text = await readFile(file, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return this.newestSnapshot(id)
+      throw error
     }
+    const scene = parseScene(text)
+    if (scene) return scene
+    const aside = `${file}.damaged-${Date.now()}`
+    await rename(file, aside)
+    console.error(`Scene ${id} could not be read; kept it as ${path.basename(aside)} and fell back to the newest snapshot`)
+    return this.newestSnapshot(id)
+  }
+
+  private async newestSnapshot(id: string): Promise<StoredScene | undefined> {
+    const folder = path.join(this.folder(id), 'history')
+    let names: string[]
+    try { names = (await readdir(folder)).filter((file) => file.endsWith('.json')).sort().reverse() } catch { return undefined }
+    for (const name of names) {
+      const scene = parseScene(await readFile(path.join(folder, name), 'utf8').catch(() => ''))
+      if (scene) return scene
+    }
+    return undefined
   }
 
   save(id: string, scene: StoredScene) {
