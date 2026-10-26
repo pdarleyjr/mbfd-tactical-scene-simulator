@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { useUi } from '../store/ui'
-import { useSaveStatus, reloadFromStorage } from '../lib/workspace'
+import { useLive } from '../lib/live'
+import { openAsSeparateScene } from '../lib/workspace'
 
 export function Toasts() {
   const toasts = useUi((state) => state.toasts)
@@ -18,21 +19,24 @@ export function Toasts() {
   )
 }
 
-/** Persistent notices: storage that will not survive, or edits from another tab. */
+/** Persistent notices: a lost connection, or arriving while others are already working. */
 export function Banners() {
-  const durable = useSaveStatus((state) => state.durable)
-  const saveError = useSaveStatus((state) => state.state === 'error' ? state.message ?? 'Saving failed.' : null)
-  const otherTab = useUi((state) => state.otherTabChanged)
-  if (otherTab) {
+  const connection = useLive((state) => state.connection)
+  const peers = useLive((state) => state.peers)
+  const arrived = useLive((state) => state.arrivedToCompany)
+  const display = useUi((state) => state.display)
+  if (connection === 'reconnecting') {
+    return <div className="banner banner--warning" role="alert" data-testid="offline-banner"><span>Connection lost. Keep working: changes stay on this device and are shared as soon as it reconnects.</span></div>
+  }
+  if (arrived && !display && peers > 1) {
+    const others = peers - 1
     return (
-      <div className="banner banner--info" role="alert">
-        <span>This scene was changed in another tab or window.</span>
-        <button type="button" className="btn btn--primary" onClick={() => void reloadFromStorage()}>Load latest</button>
-        <button type="button" className="btn btn--quiet" onClick={() => useUi.getState().setOtherTabChanged(false)}>Keep this version</button>
+      <div className="banner banner--info" role="alert" data-testid="in-use-banner">
+        <span>{others === 1 ? 'Someone is' : `${others} people are`} already working in this scene. Changes show up for everyone live.</span>
+        <button type="button" className="btn btn--primary" onClick={() => useLive.getState().setArrivalNoticeSeen()}>Work together</button>
+        <button type="button" className="btn btn--quiet" onClick={() => void openAsSeparateScene()} data-testid="banner-separate-scene">Start a separate scene</button>
       </div>
     )
   }
-  if (saveError) return <div className="banner banner--warning" role="alert"><span>Your latest changes are not saved: {saveError} Download a scene file to keep them.</span></div>
-  if (!durable) return <div className="banner banner--warning" role="alert"><span>This browser is not keeping data (private browsing). Download a scene file before you close this tab.</span></div>
   return null
 }

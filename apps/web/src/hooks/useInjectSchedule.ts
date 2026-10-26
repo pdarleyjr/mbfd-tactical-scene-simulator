@@ -5,8 +5,10 @@ import { useUi } from '../store/ui'
 /** Reveals injects that carry an automatic time once the clock passes it. */
 export function useInjectSchedule() {
   const running = useBoard((state) => state.board.training.timer.running)
+  // A classroom display only shows the scene; the people working it reveal injects.
+  const display = useUi((state) => state.display)
   useEffect(() => {
-    if (!running) return
+    if (!running || display) return
     const interval = setInterval(() => {
       const { board, revealInject } = useBoard.getState()
       const now = elapsedMs(board.training.timer)
@@ -19,5 +21,5 @@ export function useInjectSchedule() {
       }
     }, 500)
     return () => clearInterval(interval)
-  }, [running])
+  }, [running, display])
 }

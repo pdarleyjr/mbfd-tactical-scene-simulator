@@ -1,13 +1,24 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Browser, type Page } from '@playwright/test'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Sim = any
 
-async function open(page: Page) {
-  await page.goto('/')
-  await expect(page.locator('.app[data-ready]')).toBeVisible()
+/** Every test works in its own live scene, so parallel tests never share one. */
+function freshSceneId() {
+  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
+  return Array.from({ length: 10 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')
+}
+
+async function ready(page: Page) {
+  await expect(page.locator('.app[data-ready][data-live="live"]')).toBeVisible()
   await page.waitForFunction(() => Boolean((window as Sim).__sim))
   await page.waitForTimeout(150)
+}
+
+async function open(page: Page, sceneId = freshSceneId(), query = '') {
+  await page.goto(`/s/${sceneId}${query}`)
+  await ready(page)
+  return sceneId
 }
 
 const board = (page: Page) => page.evaluate(() => (window as Sim).__sim.board())
@@ -52,7 +63,7 @@ test.describe('MBFD Tactical Scene Simulator', () => {
     expect(current.scenario.injects).toHaveLength(2)
     expect(current.scenario.benchmarks).toHaveLength(5)
     expect(current.scenario.hoseLoads.loadLengthFt.jumpline).toBe(200)
-    await expect(page.getByTestId('save-status')).toContainText(/Saved on this device|Saved|Not saving/)
+    await expect(page.getByTestId('live-status')).toHaveAttribute('data-connection', 'live')
     await expect(page.getByTestId('calibration-badge')).toHaveText('Calibrated')
   })
 
@@ -238,14 +249,15 @@ test.describe('MBFD Tactical Scene Simulator', () => {
     await expect(page.getByTestId('draft-length')).toContainText('150 ft')
   })
 
-  test('autosaves, restores after reload, and resets without losing work', async ({ page }) => {
+  test('saves on the server, restores after reload, and resets without losing work', async ({ page }) => {
     await open(page)
     await placeUnit(page, 'L3', 800, 600)
     await placeUnit(page, 'E2', 860, 600)
-    await expect(page.getByTestId('save-status')).toContainText('Saved', { timeout: 5000 })
-    await page.waitForTimeout(700)
+    await page.waitForTimeout(900)
+    // Clear this browser's cached copy: what comes back must come from the server.
+    await page.evaluate(() => new Promise((resolve) => { const request = indexedDB.deleteDatabase('mbfd-tactical-scene-simulator'); request.onsuccess = request.onerror = request.onblocked = () => resolve(null) }))
     await page.reload()
-    await open(page)
+    await ready(page)
     expect((await board(page)).objects.filter((object: Sim) => object.type === 'apparatus')).toHaveLength(2)
 
     await page.getByTestId('more-menu').click()
@@ -259,7 +271,7 @@ test.describe('MBFD Tactical Scene Simulator', () => {
     expect(current.objects.filter((object: Sim) => object.type === 'apparatus')).toHaveLength(2)
   })
 
-  test('exports a portable scene file and imports it as a new board', async ({ page }, testInfo) => {
+  test('exports a portable scene file and imports it as a separate scene', async ({ page }, testInfo) => {
     await open(page)
     await placeUnit(page, 'E4', 820, 640)
     const original = await board(page)
@@ -268,13 +280,14 @@ test.describe('MBFD Tactical Scene Simulator', () => {
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-scene').click()])
     const path = testInfo.outputPath('scene.mbfd-scene.json')
     await download.saveAs(path)
+    const before = page.url()
     await page.getByTestId('import-input').setInputFiles(path)
-    await expect(page.getByTestId('library-dialog')).toHaveCount(0)
+    // An import opens as a new separate scene with its own link; nobody's work is replaced.
+    await page.waitForURL((url) => url.href !== before && /\/s\/[a-z0-9]+$/.test(url.pathname))
+    await ready(page)
     const imported = await board(page)
     expect(imported.id).not.toBe(original.id)
     expect(imported.objects.filter((object: Sim) => object.type === 'apparatus').map((object: Sim) => object.label)).toEqual(['E4'])
-    await page.getByTestId('scene-title').click()
-    await expect(page.getByTestId('board-list').locator('li')).toHaveCount(2)
   })
 
   test('runs the training flow: dispatch, video, timer, injects, benchmarks', async ({ page }) => {
@@ -348,5 +361,114 @@ test.describe('MBFD Tactical Scene Simulator', () => {
     const moved = (await board(page)).objects.find((object: Sim) => object.id === 'stress-0')
     expect(moved.x).toBeGreaterThan(130)
     expect(errors).toEqual([])
+  })
+})
+
+test.describe('Shared live scenes', () => {
+  async function secondBrowser(browser: Browser) {
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    return { context, page: await context.newPage() }
+  }
+
+  test('two people in the same scene see each other’s work live, and undo is per person', async ({ page, browser }) => {
+    const sceneId = await open(page)
+    const other = await secondBrowser(browser)
+    try {
+      await open(other.page, sceneId)
+      await expect(page.getByTestId('live-status')).toHaveAttribute('data-peers', '2')
+      await expect(other.page.getByTestId('in-use-banner')).toBeVisible()
+
+      await placeUnit(page, 'E1', 900, 600)
+      await expect.poll(async () => (await unitOf(other.page, 'E1'))?.x).toBeCloseTo(900, 0)
+      await placeUnit(other.page, 'L1', 1000, 640)
+      await expect.poll(async () => Boolean(await unitOf(page, 'L1'))).toBe(true)
+
+      // A move shows up for the other person, and their unit list stays in step.
+      await dragWorld(page, [900, 600], [960, 660])
+      await expect.poll(async () => (await unitOf(other.page, 'E1'))?.x ?? 0).toBeGreaterThan(940)
+
+      // Undo takes back only this person's last change, never the other person's unit.
+      await page.keyboard.press('Control+z')
+      await page.keyboard.press('Control+z')
+      await expect.poll(async () => Boolean(await unitOf(other.page, 'E1'))).toBe(false)
+      expect(Boolean(await unitOf(page, 'L1'))).toBe(true)
+      expect(Boolean(await unitOf(other.page, 'L1'))).toBe(true)
+
+      await other.page.close()
+      await expect(page.getByTestId('live-status')).toHaveAttribute('data-peers', '1')
+    } finally {
+      await other.context.close()
+    }
+  })
+
+  test('starts a separate scene with its own link that does not touch the first', async ({ page, browser }) => {
+    const sceneId = await open(page)
+    const other = await secondBrowser(browser)
+    try {
+      await open(other.page, sceneId)
+      await other.page.getByTestId('banner-separate-scene').click()
+      await other.page.waitForURL((url) => !url.pathname.endsWith(sceneId))
+      await ready(other.page)
+      expect(new URL(other.page.url()).pathname).toMatch(/^\/s\/[a-z0-9]{8}$/)
+      await placeUnit(other.page, 'E3', 700, 500)
+      await page.waitForTimeout(500)
+      expect(await unitOf(page, 'E3')).toBeUndefined()
+      await expect(page.getByTestId('live-status')).toHaveAttribute('data-peers', '1')
+      await expect(other.page.getByTestId('scene-title')).toContainText('Separate scene')
+    } finally {
+      await other.context.close()
+    }
+  })
+
+  test('the classroom display shows the scene live and cannot be edited', async ({ page, browser }) => {
+    const sceneId = await open(page)
+    await placeUnit(page, 'E2', 850, 600)
+    const tv = await secondBrowser(browser)
+    try {
+      await open(tv.page, sceneId, '?view=present')
+      await expect(tv.page.locator('.app[data-display]')).toBeVisible()
+      await expect(tv.page.getByTestId('present-overlay')).toBeVisible()
+      await expect(tv.page.getByTestId('present-live')).toContainText('Live')
+      await expect(tv.page.getByTestId('tool-dock')).toHaveCount(0)
+      await expect(tv.page.getByTestId('topbar')).toHaveCount(0)
+      await expect.poll(() => tv.page.evaluate(() => (window as Sim).__sim.rendered('apparatus'))).toBe(1)
+
+      // Work done at the table appears on the TV without anyone touching it.
+      await placeUnit(page, 'L3', 980, 640)
+      await expect.poll(() => tv.page.evaluate(() => (window as Sim).__sim.rendered('apparatus'))).toBe(2)
+      await page.getByTestId('training-toggle').click()
+      await page.getByTestId('start-timer').click()
+      await page.getByTestId('reveal-occupant-report').click()
+      await expect(tv.page.getByTestId('inject-banner')).toContainText('Occupant report')
+
+      // Dragging on the TV never moves a unit.
+      const before = await unitOf(tv.page, 'E2')
+      await dragWorld(tv.page, [850, 600], [920, 660])
+      await tv.page.waitForTimeout(300)
+      expect((await unitOf(page, 'E2')).x).toBe(before.x)
+
+      // The presenter's own Present view offers the display link.
+      await page.keyboard.press('Escape')
+      await page.getByTestId('present-button').click()
+      await expect(page.getByTestId('present-display-link')).toBeVisible()
+      await expect(page.getByTestId('present-live')).toContainText('2 connected')
+    } finally {
+      await tv.context.close()
+    }
+  })
+
+  test('keeps working through a dropped connection and shares the edits when it returns', async ({ page, browser }) => {
+    const sceneId = await open(page)
+    const other = await secondBrowser(browser)
+    try {
+      await open(other.page, sceneId)
+      await page.evaluate(() => (window as Sim).__sim.dropConnection())
+      await expect(page.getByTestId('live-status')).not.toHaveAttribute('data-connection', 'live')
+      await placeUnit(page, 'E4', 760, 560)
+      await expect(page.locator('.app[data-live="live"]')).toBeVisible({ timeout: 15_000 })
+      await expect.poll(async () => Boolean(await unitOf(other.page, 'E4')), { timeout: 10_000 }).toBe(true)
+    } finally {
+      await other.context.close()
+    }
   })
 })

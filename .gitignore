@@ -33,3 +33,7 @@ test-results/
 *.njsproj
 *.sln
 *.sw?
+
+# Live scene data written by the local sync service
+apps/sync/data/
+.e2e-data/

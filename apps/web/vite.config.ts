@@ -25,7 +25,7 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/sync/, /^\/media\//],
         globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*'],
         globPatterns: ['**/*.{js,css,html,svg,woff2}', 'mbfd-seal-96.webp', 'scenario-assets/seed/apparatus/*.webp', 'scenario-assets/seed/background.webp'],
         runtimeCaching: [{
@@ -37,5 +37,12 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    proxy: {
+      '/sync-api': 'http://127.0.0.1:8090',
+      '/media': 'http://127.0.0.1:8090',
+      '/sync': { target: 'ws://127.0.0.1:8090', ws: true },
+    },
+  },
 })

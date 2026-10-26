@@ -3,13 +3,17 @@ import { ChevronDown, ClipboardCheck, Droplets, Download, FileImage, Keyboard, M
 import { useWaterSupply } from '../store/selectors'
 import { useBoard } from '../store/board'
 import { useUi } from '../store/ui'
-import { useSaveStatus, exportCurrentBoard, exportImage } from '../lib/workspace'
+import { exportCurrentBoard, exportImage } from '../lib/workspace'
+import { LiveMenu } from './LiveMenu'
+import { useLive } from '../lib/live'
+import { MAIN_SCENE_ID } from '@mbfd/domain'
 import { useElapsed } from '../hooks/useElapsed'
-import { formatElapsed, formatRelative } from '../lib/format'
+import { formatElapsed } from '../lib/format'
 import { enterPresentation } from '../lib/presentation'
 
 export function TopBar() {
   const board = useBoard((state) => state.board)
+  const sceneId = useLive((state) => state.sceneId)
   const togglePanel = useUi((state) => state.togglePanel)
   const panel = useUi((state) => state.panel)
   const openDialog = useUi((state) => state.openDialog)
@@ -24,11 +28,11 @@ export function TopBar() {
     <header className="topbar" data-testid="topbar">
       <div className="topbar__left">
         <img className="topbar__mark" src="/mbfd-seal-96.webp" alt="Miami Beach Fire Department" width={40} height={40} />
-        <button type="button" className="topbar__title" onClick={() => openDialog('library')} aria-label="Open scene library" data-testid="scene-title">
-          <span className="topbar__eyebrow">{board.name === board.scenario.title ? 'Working board' : board.name}</span>
+        <button type="button" className="topbar__title" onClick={() => openDialog('library')} aria-label="Open scenes and saved versions" data-testid="scene-title">
+          <span className="topbar__eyebrow">{sceneId === MAIN_SCENE_ID ? 'Main scene' : 'Separate scene'}{board.name !== board.scenario.title ? ` · ${board.name}` : ''}</span>
           <span className="topbar__name">{board.scenario.title}<ChevronDown size={16} aria-hidden /></span>
         </button>
-        <SaveIndicator />
+        <LiveMenu />
       </div>
       <div className="topbar__right">
         <div className="timer-chip" data-running={timer.running} data-testid="timer-chip">
@@ -62,27 +66,6 @@ export function TopBar() {
         />
       </div>
     </header>
-  )
-}
-
-function SaveIndicator() {
-  const status = useSaveStatus()
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const interval = setInterval(() => tick((value) => value + 1), 15_000)
-    return () => clearInterval(interval)
-  }, [])
-  const text = !status.durable
-    ? 'Not saving (private browsing)'
-    : status.state === 'saving' ? 'Saving…'
-    : status.state === 'error' ? 'Save failed'
-    : status.at ? `Saved on this device · ${formatRelative(status.at)}` : 'Saved on this device'
-  const tone = !status.durable || status.state === 'error' ? 'warning' : status.state === 'saving' ? 'busy' : 'ok'
-  return (
-    <span className={`save-indicator save-indicator--${tone}`} role="status" aria-live="polite" data-testid="save-status" title="Work is saved automatically in this browser on this device. Use Download scene file to move it to another device.">
-      <span className="save-indicator__dot" aria-hidden />
-      <span className="save-indicator__text">{text}</span>
-    </span>
   )
 }
 

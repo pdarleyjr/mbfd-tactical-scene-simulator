@@ -4,6 +4,7 @@ import { sceneContext, useBoard } from './store/board'
 import { useUi } from './store/ui'
 import { canvasApi } from './canvas/api'
 import { worldToScreen } from './canvas/viewport'
+import { dropConnectionForTests } from './lib/live'
 
 /**
  * Development-only window hook for end-to-end tests: lets a test read the
@@ -30,6 +31,8 @@ export function installTestHook() {
         const port = object ? findPort(object, portId, sceneContext(board.scenario)) : undefined
         return object && port ? portWorldPosition(object, port) : null
       },
+      /** Simulates a dropped connection that returns after a few seconds. */
+      dropConnection: () => dropConnectionForTests(2500),
       /** Rendered canvas nodes by name, e.g. 'apparatus' or 'hose'. */
       rendered: (name: string) => Konva.stages[0]?.find(`.${name}`).length ?? 0,
     },
