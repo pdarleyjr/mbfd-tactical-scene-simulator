@@ -1,42 +1,41 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   plugins: [
     react(),
-    tailwindcss(),
     VitePWA({
+      // The same /sw.js path the V2 app registered, so installed clients pick
+      // up this release automatically and drop the V2 caches.
       registerType: 'autoUpdate',
       manifest: {
         name: 'MBFD Tactical Scene Simulator',
         short_name: 'MBFD Tactical',
-        description: 'Multi-user tactical fireground training for Miami Beach Fire Department.',
-        theme_color: '#111a1f',
-        background_color: '#111a1f',
+        description: 'Fireground tactical training board for Miami Beach Fire Department.',
+        theme_color: '#0f1519',
+        background_color: '#0f1519',
         display: 'standalone',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+        icons: [
+          { src: '/mbfd-seal-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/mbfd-seal-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        ],
       },
       workbox: {
+        cleanupOutdatedCaches: true,
         navigateFallback: '/index.html',
-        globPatterns: ['**/*.{js,css,html,svg,png,webp,woff2}'],
+        navigateFallbackDenylist: [/^\/api\//],
+        globIgnores: ['**/*cyrillic*', '**/*greek*', '**/*vietnamese*'],
+        globPatterns: ['**/*.{js,css,html,svg,woff2}', 'mbfd-seal-96.webp', 'scenario-assets/seed/apparatus/*.webp', 'scenario-assets/seed/background.webp'],
         runtimeCaching: [{
           urlPattern: ({ url }) => url.pathname.startsWith('/scenario-assets/'),
           handler: 'CacheFirst',
-          options: { cacheName: 'scenario-assets-v2', expiration: { maxEntries: 60, maxAgeSeconds: 60 * 60 * 24 * 30 } },
+          options: { cacheName: 'scenario-assets-v3', expiration: { maxEntries: 40, maxAgeSeconds: 60 * 60 * 24 * 60 }, rangeRequests: true },
         }],
       },
     }),
   ],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': { target: 'http://127.0.0.1:3000' },
-      '/scenario-assets': { target: 'http://127.0.0.1:3000' },
-      '/collab': { target: 'ws://127.0.0.1:1234', ws: true, rewrite: () => '/' },
-    },
-  },
+  server: { port: 5173 },
 })

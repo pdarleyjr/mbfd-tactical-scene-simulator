@@ -1,0 +1,92 @@
+[
+  {
+    "path": "data/assets/source/aerial_view_for_house_fire.png",
+    "bytes": 3315276,
+    "sha256": "50979d2c7ede723c15e57e177b14ee60308afaf01fd8e744dd16bc5600e22e90"
+  },
+  {
+    "path": "data/assets/source/house_fire_video.mp4",
+    "bytes": 25149664,
+    "sha256": "58bc266bdc75916914a53d603f305b02e20da058ad8193ca1b851a3df2783128"
+  },
+  {
+    "path": "data/assets/source/apparatus/E1.png",
+    "bytes": 2590494,
+    "sha256": "800e2aaa7c21218364a4ae4e28796cc06ac4a693a93b9df20a60944e421e8794"
+  },
+  {
+    "path": "data/assets/source/apparatus/E2.png",
+    "bytes": 2521019,
+    "sha256": "56bdc022431804911ffcf910f557a8eaafe91f37bd3ace49c15de81b4e7fe957"
+  },
+  {
+    "path": "data/assets/source/apparatus/E3.png",
+    "bytes": 2533165,
+    "sha256": "93b3220fa6c43a76d594646a61d66ac1a0eb23fdfc3ddc76de2c8943df78dea3"
+  },
+  {
+    "path": "data/assets/source/apparatus/E4.png",
+    "bytes": 2511779,
+    "sha256": "8e798f61a014f00c0e30927830a998ac5be5656b15e28c30547cc3cabe02572d"
+  },
+  {
+    "path": "data/assets/source/apparatus/L1.png",
+    "bytes": 2704258,
+    "sha256": "7bc48f274989ee4c4b4fd99f9aa057344e2a49f000e8949fa084682417b54f0f"
+  },
+  {
+    "path": "data/assets/source/apparatus/L3.png",
+    "bytes": 2527022,
+    "sha256": "d030f3a80f6badfe30d1a33e7a8432681cb197e270d48405646c5d11d5af92c3"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/background-thumb.webp",
+    "bytes": 90698,
+    "sha256": "1627e877e300ef08200792e5abcb72abb636e2631289df6658a7d82e05a92979"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/background.webp",
+    "bytes": 694404,
+    "sha256": "0d9f3b32bf909332c6c7e8b635dec81049510495424e4dac6ceddf8c579e316a"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/initial-conditions-poster.webp",
+    "bytes": 121708,
+    "sha256": "edeeb78b6bc1f54877d1587cceda6c951a05466816a47b81723ae490b257dce3"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/initial-conditions.mp4",
+    "bytes": 6098089,
+    "sha256": "17f2c016395947e8777844a7d55f36eed01f358dacfac2b1ca6f3cf95f3d148c"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/E1.webp",
+    "bytes": 110422,
+    "sha256": "e5204209fbd8b90b81862996eaec077095ae68062386e1686eb30aade46fdc1d"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/E2.webp",
+    "bytes": 107164,
+    "sha256": "4081bd8df65a13747c52eeb65c41d2017e09fed19105722f70e9079a379b0e0a"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/E3.webp",
+    "bytes": 106970,
+    "sha256": "56d1f648ad12891959e92cbe27d9a1b94d15cba8996e6c3e51b59607f2e5b41b"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/E4.webp",
+    "bytes": 104922,
+    "sha256": "666ed86a86c7d742dc3fea1350973495e4b7ca562c00cdb6ea5e4f56373e92dc"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/L1.webp",
+    "bytes": 103966,
+    "sha256": "9db4dca798aa629ce5821c7c85256f8d3e23723750db2824c22fee94793b88d1"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/apparatus/L3.webp",
+    "bytes": 94708,
+    "sha256": "d1c931cb6db89d3fbbc4c3180f0da4cae931ecf3448d6fed232b997102187874"
+  }
+]

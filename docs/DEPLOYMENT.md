@@ -1,86 +1,59 @@
-# GMKtec production deployment
+# Deployment (V3 static app)
 
-## Paths and ports
+V3 is one container: Caddy serving the built app and scenario media on loopback `127.0.0.1:8230`, the same port the `mbfdhub-gmktec` Cloudflare Tunnel already routes `firesim.mbfdhub.com` to. **No tunnel, DNS, or Cloudflare change is needed.**
 
-- Checkout: `/opt/mbfd/mbfd-tactical-scene-simulator`
-- Compose project: `mbfd-tactical-scene-simulator`
-- Host listener: `127.0.0.1:8230`
-- Internal API: `app:3000`
-- Internal collaboration WebSocket: `app:1234`
-- PostgreSQL: `db:5432` (Compose network only)
-- Scenario media: `/opt/mbfd/mbfd-tactical-scene-simulator/data/assets`
-- PostgreSQL data: Docker volume `mbfd-tactical-scene-simulator_postgres_data`
+| | V2 | V3 |
+| --- | --- | --- |
+| Containers | web (Caddy), app (Fastify + Hocuspocus), db (PostgreSQL 18) | web (Caddy) |
+| Secrets | database password, signing secret, instructor PIN | none |
+| Persistent server data | PostgreSQL volume, uploaded media | none (scene data is in each browser and in scene files) |
+| Health | `/api/health` from Fastify | `/api/health` answered by Caddy (same path, `"mode":"static"`) |
 
-The existing `mbfdhub-gmktec` Cloudflare Tunnel routes `firesim.mbfdhub.com` to `http://127.0.0.1:8230`. Do not create a public host port for the API, collaboration service, or database.
+Checkout: `/opt/mbfd/mbfd-tactical-scene-simulator`. Compose project: `mbfd-tactical-scene-simulator`.
 
-## First deployment
+## Cutover from V2 (one time)
 
-```bash
-install -d -m 700 secrets
-openssl rand -base64 48 > secrets/database_password
-openssl rand -base64 48 > secrets/session_signing_secret
-printf '%s' 'CHOOSE-A-DEPARTMENT-PIN' > secrets/instructor_pin
-chmod 600 secrets/*
-cp .env.example .env
-sed -i "s/^APP_RELEASE=.*/APP_RELEASE=$(git rev-parse HEAD)/" .env
-docker compose config --quiet
-docker compose build
-docker compose up -d
-docker compose ps
-curl --fail --silent http://127.0.0.1:8230/api/health
-```
+V2 data is not needed by V3, but it is preserved for rollback and records.
 
-Never paste secret values into shell history, logs, Git, Compose YAML, or Cloudflare configuration. On the managed host, create secret files with an interactive no-echo method when practical.
+1. **Back up V2 first** (from the checkout, with V2 still running):
+   ```bash
+   install -d -m 700 backups
+   docker compose exec -T db pg_dump -U firesim -d firesim -Fc > backups/firesim-v2-final-$(date +%Y%m%d-%H%M%S).dump
+   tar -czf backups/firesim-v2-assets-$(date +%Y%m%d-%H%M%S).tgz data/assets
+   curl -fsS http://127.0.0.1:8230/api/scenarios > backups/firesim-v2-scenarios-$(date +%Y%m%d-%H%M%S).json
+   ls -l backups/
+   ```
+   Confirm the dump is non-empty (`pg_restore --list` works on it) before continuing.
+2. Note the current V2 commit for rollback: `git rev-parse HEAD` (expected `de8a687…`).
+3. Deploy V3:
+   ```bash
+   git fetch --prune origin
+   git checkout main && git pull --ff-only origin main
+   export APP_RELEASE=$(git rev-parse HEAD)
+   docker compose build
+   docker compose up -d --remove-orphans
+   docker compose ps
+   curl -fsS http://127.0.0.1:8230/api/health
+   ```
+   `--remove-orphans` stops the V2 `app` and `db` containers. It does **not** delete the `mbfd-tactical-scene-simulator_postgres_data` volume. Never run `docker compose down -v` here.
+4. Verify through Cloudflare: `https://firesim.mbfdhub.com/` opens the Waterfront Estate board with no sign-in; `/api/health` reports the new release; apparatus art, background, and video load; an installed PWA updates on next launch (the service worker path `/sw.js` is unchanged, so V2 clients pick up V3 automatically).
 
-## Migrations and persistence
-
-The app applies Drizzle migrations before listening. PostgreSQL and scenario media are persistent across container replacement. Before a production upgrade:
-
-```bash
-docker compose exec -T db pg_dump -U firesim -d firesim -Fc > backups/firesim-$(date +%Y%m%d-%H%M%S).dump
-tar -czf backups/firesim-assets-$(date +%Y%m%d-%H%M%S).tgz data/assets
-```
-
-Create `backups/` with mode 700 and retain at least the most recent known-good backup off the container filesystem.
-
-## Upgrade
+## Upgrades
 
 ```bash
-git fetch --prune origin
-git checkout main
 git pull --ff-only origin main
-sed -i "s/^APP_RELEASE=.*/APP_RELEASE=$(git rev-parse HEAD)/" .env
-docker compose build
-docker compose up -d --remove-orphans
-docker compose ps
-curl --fail --silent http://127.0.0.1:8230/api/health
+export APP_RELEASE=$(git rev-parse HEAD)
+docker compose build && docker compose up -d
+curl -fsS http://127.0.0.1:8230/api/health
 ```
 
-Then verify HTTPS, the reported release, static scenario assets, session creation/join, two-browser convergence, Independent 300 isolation, and `wss://firesim.mbfdhub.com/collab` through Cloudflare.
+There are no migrations. Saved boards live in users' browsers; scene schema changes must stay backward compatible or ship an in-app migration (saved boards are validated on load and damaged objects are salvaged individually).
 
 ## Rollback
 
-The pre-V2 source is preserved by both branch and annotated tag `legacy-mvp-before-v2`. For a V2 rollback, check out a previously verified V2 commit and rebuild:
+- **To a previous V3 commit:** `git checkout --detach <sha>`, rebuild, `up -d`.
+- **To V2:** `git checkout --detach de8a687`, restore the V2 `secrets/` files if they were removed, `docker compose build && docker compose up -d`. The V2 PostgreSQL volume is still present, so V2 resumes with its data. Restore from the dump only if the volume was lost.
 
-```bash
-git checkout --detach VERIFIED_COMMIT_SHA
-sed -i "s/^APP_RELEASE=.*/APP_RELEASE=$(git rev-parse HEAD)/" .env
-docker compose build
-docker compose up -d
-```
+## Hosting elsewhere
 
-Application rollback does not automatically reverse database migrations. Restore the matching database dump only when the migration history requires it. Never delete the current volume until the backup is verified.
-
-## Cloudflare Tunnel change safety
-
-`mbfdhub-gmktec` is a remotely managed tunnel. Its connector runs with a protected token file and consumes ingress configuration from Cloudflare; there is no local `config.yml` to edit. Do not convert it to a locally managed tunnel and do not restart the shared connector for a hostname-only change.
-
-The production route is:
-
-- tunnel: `mbfdhub-gmktec` (`20cb894c-a5b0-4149-bc11-1499d772401e`)
-- ingress: `firesim.mbfdhub.com` to `http://127.0.0.1:8230`
-- DNS: proxied CNAME to `20cb894c-a5b0-4149-bc11-1499d772401e.cfargotunnel.com`
-
-Before an ingress change, fetch the current remote configuration through the Cloudflare API and retain the complete response. Preserve every existing rule in order, insert any hostname rule immediately before the terminal `http_status:404` rule, and confirm the connector reports the new configuration version in `journalctl -u cloudflared`. The initial V2 cutover backups are stored with mode `600` in `backups/cloudflare-tunnel-config-v18-before-firesim.json` and `backups/cloudflare-firesim-worker-domain-before-cutover.json` on GMKtec.
-
-The legacy Worker deployment and `legacy-mvp-before-v2` source tag remain available for rollback. To restore the legacy edge path, remove the tunnel CNAME and reattach `firesim.mbfdhub.com` as a custom domain for the `mbfd-tactical-scene-simulator` Worker. Remove the tunnel ingress only after the Worker endpoint is healthy. Do not alter unrelated tunnel ingress rules, DNS records, the cloudflared service, or Tailscale.
+The build output (`apps/web/dist`) is plain static files and can be served by any static host (for example Cloudflare Pages). Requirements: SPA fallback to `index.html`, `no-cache` on `/sw.js` and `/index.html`, and the security headers in `Caddyfile`.

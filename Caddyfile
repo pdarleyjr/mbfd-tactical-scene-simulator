@@ -1,19 +1,29 @@
 :8080 {
   encode zstd gzip
 
-  # The service worker is the release manifest for the installed PWA. It must
-  # always reach the origin; caching it at the browser or CDN can pin clients
-  # to an obsolete interface after a successful deployment.
-  @serviceWorker path /sw.js /workbox-*.js
+  # Health endpoint kept at the V2 path so existing monitors keep working.
+  handle /api/health {
+    header Content-Type application/json
+    header Cache-Control "no-store"
+    respond `{"status":"ok","service":"mbfd-tactical-scene-simulator","release":"{$APP_RELEASE}","mode":"static"}` 200
+  }
+
+  # V2 server routes no longer exist; answer plainly instead of serving the app.
+  handle /api/* {
+    respond "Not found" 404
+  }
+  handle /collab* {
+    respond "Not found" 404
+  }
+
+  # The service worker is the release manifest for installed clients. It must
+  # always reach the origin, or clients can stay pinned to an old interface.
+  @serviceWorker path /sw.js /workbox-*.js /registerSW.js
   header @serviceWorker {
     Cache-Control "no-store, no-cache, must-revalidate"
     CDN-Cache-Control "no-store"
-    Pragma "no-cache"
-    Expires "0"
   }
 
-  # Entry documents contain hashed asset references and must revalidate on
-  # every visit. The referenced assets themselves are safe to cache forever.
   @entryDocument path / /index.html /manifest.webmanifest
   header @entryDocument {
     Cache-Control "no-cache, must-revalidate"
@@ -23,16 +33,13 @@
   @immutableAssets path /assets/*
   header @immutableAssets Cache-Control "public, max-age=31536000, immutable"
 
-  handle /api/* {
-    reverse_proxy app:3000
-  }
+  @scenarioAssets path /scenario-assets/*
+  header @scenarioAssets Cache-Control "public, max-age=604800"
 
-  handle /scenario-assets/* {
-    reverse_proxy app:3000
-  }
-
-  handle /collab* {
-    reverse_proxy app:1234
+  # Hashed bundles never fall back to index.html: a miss must be a real 404.
+  handle /assets/* {
+    root * /srv
+    file_server
   }
 
   handle {
@@ -46,6 +53,7 @@
     X-Frame-Options DENY
     Referrer-Policy strict-origin-when-cross-origin
     Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     -Server
   }
 }

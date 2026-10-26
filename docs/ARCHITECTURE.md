@@ -1,23 +1,48 @@
-# Architecture and collaboration invariants
+# Architecture (V3)
 
-## Data path
+## Decision: static, single operator
 
-The browser loads the PWA from Caddy. `/api/*` and `/scenario-assets/*` proxy to Fastify; `/collab` upgrades to the Hocuspocus WebSocket service. Fastify and Hocuspocus share one repository boundary backed by PostgreSQL.
+V2 was a three-service system (Caddy, Fastify + Hocuspocus/Yjs, PostgreSQL) built so many participants could join rooms with roles, tokens, unit ownership, and a private Command 300 workspace. The product requirement is now one instructor operating one board. Everything that existed only to coordinate several people was removed: rooms, PINs, signed tokens, roles and permissions, presence, WebSocket sync, the private 300 document, and the server and database behind them.
 
-Each training session can own three Yjs documents:
+What remains is a static React application. The browser holds the working state; durability comes from IndexedDB, and portability from exported scene files. There is no server to secure, migrate, or keep running, and the app works offline once loaded (PWA).
 
-- `scenario`: read-only source-scene state
-- `operations`: the shared live fireground
-- `300-plan`: Command 300's private plan
+If cross-device sharing becomes a requirement later, it should be added as an explicit "save to MBFD Hub" path behind Hub authentication, not by reviving rooms.
 
-The Hocuspocus server derives the session/workspace from the document name, verifies the signed token, refreshes current 300 mode from PostgreSQL, and rejects unauthorized documents. Incoming Sync Step 2 and Yjs Update payloads are applied to a candidate document first. Changed objects must pass the Zod domain schema and ownership policy before the real document changes.
+## Data model
 
-## World and rendering
+`packages/domain/src/scene.ts` defines schema version 3:
 
-All objects use one scenario-world coordinate system independent of screen pixels. The stage uses a single pan/zoom transform; map, apparatus, hose, annotations, selection, and presence consume the same transform. Apparatus images are visual footprints with explicit unverified calibration status. Rotation is stored in degrees; hose paths store world-coordinate polylines.
+- **Board**: one working copy of a scenario (`id`, `name`, `templateId`, `scenario`, `objects`, `training`, `snapshots`, `run`).
+- **Scenario**: title, description, dispatch, background and video media references, world size, calibration (with its reference measurement), conditions, injects, benchmarks, hose loads, and operator-entered apparatus lengths.
+- **Objects**: `apparatus`, `hydrant`, `hose`, `appliance` (gated wye), `nozzle`, `marker`, `note`, `arrow`, `measurement`. Hoses store points plus `from`/`to` port references. Ports are derived from the object type and template (`fire-model/ports.ts`), never stored per object, so there is one source of truth for connection geometry.
+- **Training**: clock (`running`, `startedAt`, `accumulatedMs`), revealed injects and completed benchmarks with elapsed times, debrief notes.
+- **Run**: base objects at clock start plus a diff log (`upserts`/`removes`/`order`) with elapsed times. `sceneAt()` rebuilds the board at any moment for replay.
 
-Manual hose endpoints use start/end coupling semantics and search for the nearest free, compatible port in a fixed screen-space snap radius. Connections persist as `{ objectId, portId }` references. Occupancy is derived from those references plus packaged-evolution port state, allowing separate gated-wye outlets to be used independently.
+Templates (`apps/web/src/templates`) are immutable. New boards and "Reset to original scenario" copy from them.
 
-## Persistence and replay
+Media references are either `builtin` (a URL under `/scenario-assets/`) or `blob` (an IndexedDB media record for operator uploads). Scene files embed blob media as data URLs.
 
-Yjs binary state is stored by document name. Browsers also keep Yjs documents in IndexedDB for reconnect/offline continuity. Bootstrap metadata is cached locally so an already-open session can recover its scene during a temporary outage. Every accepted semantic change creates an attributed session event with elapsed time, workspace, actor, object ID, and object type. Review exports the event stream as JSON or CSV.
+## Model logic (`packages/fire-model`)
+
+Pure functions, unit tested:
+
+- `reconcileHoses` runs after every change: attached ends are moved onto their ports, references to deleted objects are released, and connected hoses are oriented source → destination (outlet → inlet). It returns the same array when nothing changed, so React and the diff log stay cheap.
+- `findSnapTarget` / `eligiblePorts` enforce coupling size and opposite port direction.
+- `analyzeWaterSupply` walks connections from hydrants through hoses, wyes, and pumping apparatus, then marks tank-only lines, and reports issues. Connectivity only.
+- `readLength` / `readHose` / `scaleBar` never report feet without a calibration.
+- `evolutionSteps` describes each packaged evolution as guided steps (start rule, finish rule, load length).
+
+## State and interaction (`apps/web`)
+
+- `store/board.ts` (zustand): the board document, undo/redo (structural sharing of immutable object arrays), transient edits for drags and rotations (one history entry per gesture), training clock, snapshots, and timeline recording.
+- `store/ui.ts`: tool, selection, view transform, panels, dialogs, drafts, toasts.
+- `canvas/SceneStage.tsx`: Konva stage with background, apparatus, hose, symbol, label, and overlay layers. Native pointer handling provides pan, pinch, wheel zoom, marquee, taps, and freehand strokes; Konva handles object dragging and the rotate handle. The view is preserved through resizes and panel changes.
+- `lib/workspace.ts`: boot, debounced autosave with visible status, flush on hide, cross-tab change notice (BroadcastChannel), library operations, import/export.
+
+## Testing
+
+- `pnpm test:coverage`: domain, fire-model, store, storage, scene files, formatting, debrief.
+- `pnpm test:e2e`: Playwright on desktop (1440×900) and tablet (iPad Pro 11 landscape). Covers first load, repeat placement, selection/drag/rotate/duplicate/undo, forward lay that follows a moved engine, skid load, hose reshaping, calibration, autosave/reload/reset, export/import, training flow, presentation and replay, and a 100-apparatus/40-hose stress scene.
+- `playwright.visual.config.ts`: screenshot captures from phone to 4K for design review.
+
+In development builds only, `window.__sim` exposes the stores for tests.

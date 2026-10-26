@@ -10,8 +10,7 @@
   },
   "references": [
     { "path": "../../packages/domain" },
-    { "path": "../../packages/fire-model" },
-    { "path": "../../packages/collaboration" }
+    { "path": "../../packages/fire-model" }
   ],
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
 }

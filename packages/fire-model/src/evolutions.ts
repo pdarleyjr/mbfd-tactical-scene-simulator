@@ -1,177 +1,49 @@
-import type { EvolutionId, FiregroundObject } from '@mbfd/domain'
+import type { EvolutionId, HoseLoads, HosePurpose, HoseType, PortDefinition, SceneObject } from '@mbfd/domain'
 
-export interface EvolutionActor {
-  clientId: string
-  name: string
-  unit: string
+/**
+ * A packaged evolution is a guided sequence of hose lays. Each step says what
+ * the line must start on, how it is finished, and which configured load
+ * length it is compared against.
+ */
+export type StartRule = 'hydrant' | 'intake' | 'discharge' | 'previous-wye' | 'any'
+export type FinishRule = 'nozzle' | 'wye' | 'none'
+
+export interface EvolutionStep {
+  hoseType: HoseType
+  purpose: HosePurpose
+  start: StartRule
+  finish: FinishRule
+  loadFt: number
+  layDirection?: 'forward' | 'reverse'
+  prompt: { start: string; route: string }
 }
 
-export interface EvolutionResult {
-  evolutionId: EvolutionId
-  evolutionInstanceId: string
-  objects: FiregroundObject[]
-}
-
-interface EvolutionOptions {
-  nozzle?: 'fog' | 'smooth-bore'
-}
-
-function id(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`
-}
-
-function attribution(actor: EvolutionActor) {
-  const now = new Date().toISOString()
-  return {
-    createdByClientId: actor.clientId,
-    createdByName: actor.name,
-    createdByUnit: actor.unit,
-    createdAt: now,
-    updatedAt: now,
+export function evolutionSteps(evolutionId: EvolutionId, loads: HoseLoads): EvolutionStep[] {
+  const load = loads.loadLengthFt
+  switch (evolutionId) {
+    case 'forward-lay':
+      return [{ hoseType: 'supply5', purpose: 'supply', start: 'hydrant', finish: 'none', loadFt: load['forward-lay'], layDirection: 'forward', prompt: { start: 'Tap a hydrant to start the forward lay.', route: 'Route the lay to an engine intake.' } }]
+    case 'reverse-lay':
+      return [{ hoseType: 'supply5', purpose: 'supply', start: 'intake', finish: 'none', loadFt: load['reverse-lay'], layDirection: 'reverse', prompt: { start: 'Tap the engine intake to start the reverse lay.', route: 'Route the lay to a hydrant.' } }]
+    case 'jumpline':
+      return [{ hoseType: 'attack175', purpose: 'attack', start: 'discharge', finish: 'nozzle', loadFt: load.jumpline, prompt: { start: 'Tap a 1½″ discharge to pull the jumpline.', route: 'Route the line to the fire. Finish to place the nozzle.' } }]
+    case 'high-rise-pack':
+      return [{ hoseType: 'attack175', purpose: 'attack', start: 'any', finish: 'nozzle', loadFt: load['high-rise-pack'], prompt: { start: 'Tap where the pack connects (standpipe, wye, or discharge).', route: 'Route the line. Finish to place the nozzle.' } }]
+    case 'skid-load':
+      return [
+        { hoseType: 'hose3', purpose: 'feeder', start: 'discharge', finish: 'wye', loadFt: load['skid-load'], prompt: { start: 'Tap the 2½″ discharge to pull the skid load.', route: 'Route the 3″ feeder. Finish where the gated wye goes.' } },
+        { hoseType: 'attack175', purpose: 'attack', start: 'previous-wye', finish: 'nozzle', loadFt: load['skid-load-attack'], prompt: { start: 'Attack line starts at wye outlet A.', route: 'Route the attack line. Finish to place the nozzle.' } },
+      ]
   }
 }
 
-function positioned(actor: EvolutionActor, at: { x: number; y: number }) {
-  return {
-    x: at.x,
-    y: at.y,
-    rotation: 0,
-    locked: false,
-    ...attribution(actor),
+/** Whether a port satisfies a step's start rule. */
+export function startRuleAccepts(rule: StartRule, object: SceneObject, port: PortDefinition): boolean {
+  switch (rule) {
+    case 'hydrant': return object.type === 'hydrant'
+    case 'intake': return object.type === 'apparatus' && port.direction === 'inlet'
+    case 'discharge': return object.type === 'apparatus' && port.direction === 'outlet'
+    case 'previous-wye': return object.type === 'appliance'
+    case 'any': return true
   }
-}
-
-export function createEvolutionObjects(
-  evolutionId: EvolutionId,
-  actor: EvolutionActor,
-  at: { x: number; y: number },
-  sourceObjectId: string,
-  options: EvolutionOptions = {},
-): EvolutionResult {
-  const instanceId = id(`evolution-${evolutionId}`)
-
-  if (evolutionId === 'skid-load') {
-    const feederId = id('hose3')
-    const attackId = id('attack175')
-    const wyeId = id('wye')
-    const nozzleId = id('nozzle')
-    const nozzle = options.nozzle ?? 'fog'
-    const objects: FiregroundObject[] = [
-      {
-        ...positioned(actor, at),
-        id: feederId,
-        type: 'hoseSegment',
-        hoseType: 'hose3',
-        coupling: 'nh-2.5-female',
-        startCoupling: 'nh-2.5-female',
-        endCoupling: 'nh-2.5-male',
-        points: [at.x - 150, at.y, at.x, at.y],
-        nominalLengthFt: 300,
-        sectionCount: 3,
-        layDirection: 'feeder',
-        connectedFrom: { objectId: sourceObjectId, portId: 'discharge-2.5' },
-        connectedTo: { objectId: wyeId, portId: 'inlet' },
-      },
-      {
-        ...positioned(actor, at),
-        id: wyeId,
-        type: 'appliance',
-        applianceType: 'gated-wye',
-        connectionPoints: [
-          { id: 'inlet', label: '3-inch inlet', coupling: 'nh-2.5-female', direction: 'inlet', x: -18, y: 0, occupiedBy: feederId },
-          { id: 'outlet-a', label: 'Outlet A', coupling: 'nh-1.5-male', direction: 'outlet', x: 18, y: -9, occupiedBy: attackId },
-          { id: 'outlet-b', label: 'Outlet B', coupling: 'nh-1.5-male', direction: 'outlet', x: 18, y: 9 },
-        ],
-      },
-      {
-        ...positioned(actor, { x: at.x + 40, y: at.y - 20 }),
-        id: attackId,
-        type: 'hoseSegment',
-        hoseType: 'attack175',
-        coupling: 'nh-1.5-female',
-        startCoupling: 'nh-1.5-female',
-        endCoupling: 'nh-1.5-male',
-        points: [at.x + 18, at.y - 9, at.x + 150, at.y - 80],
-        nominalLengthFt: 200,
-        sectionCount: 2,
-        layDirection: 'attack',
-        connectedFrom: { objectId: wyeId, portId: 'outlet-a' },
-        connectedTo: { objectId: nozzleId, portId: 'inlet' },
-      },
-      {
-        ...positioned(actor, { x: at.x + 150, y: at.y - 80 }),
-        id: nozzleId,
-        type: 'nozzle',
-        nozzleType: nozzle,
-        coupling: 'nh-1.5-female',
-        connectedTo: { objectId: attackId, portId: 'end' },
-      },
-    ]
-    return { evolutionId, evolutionInstanceId: instanceId, objects }
-  }
-
-  if (evolutionId === 'jumpline' || evolutionId === 'high-rise-pack') {
-    const sectionCount = evolutionId === 'high-rise-pack' ? 2 : 1
-    const nominalLengthFt = evolutionId === 'high-rise-pack' ? 200 : 100
-    const nozzle = options.nozzle ?? 'fog'
-    const hoseId = id('attack175')
-    const nozzleId = id('nozzle')
-    return {
-      evolutionId,
-      evolutionInstanceId: instanceId,
-      objects: [
-        {
-          ...positioned(actor, at),
-          id: id('bundle'),
-          type: 'hoseBundle',
-          bundleType: evolutionId,
-          hoseType: 'attack175',
-          sectionCount,
-          nominalLengthFt,
-          selectedNozzle: nozzle,
-          deployedSegmentIds: [hoseId],
-        },
-        {
-          ...positioned(actor, at),
-          id: hoseId,
-          type: 'hoseSegment',
-          hoseType: 'attack175',
-          coupling: 'nh-1.5-female',
-          startCoupling: 'nh-1.5-female',
-          endCoupling: 'nh-1.5-male',
-          points: [at.x, at.y, at.x + 120, at.y],
-          nominalLengthFt,
-          sectionCount,
-          layDirection: 'attack',
-          connectedFrom: { objectId: sourceObjectId, portId: 'outlet-b' },
-          connectedTo: { objectId: nozzleId, portId: 'inlet' },
-        },
-        {
-          ...positioned(actor, { x: at.x + 120, y: at.y }),
-          id: nozzleId,
-          type: 'nozzle',
-          nozzleType: nozzle,
-          coupling: 'nh-1.5-female',
-          connectedTo: { objectId: hoseId, portId: 'end' },
-        },
-      ],
-    }
-  }
-
-  const isForward = evolutionId === 'forward-lay'
-  const hose: FiregroundObject = {
-    ...positioned(actor, at),
-    id: id('supply5'),
-    type: 'hoseSegment',
-    hoseType: 'supply5',
-    coupling: 'storz-5',
-    startCoupling: 'storz-5',
-    endCoupling: 'storz-5',
-    points: [at.x, at.y, at.x + 220, at.y],
-    nominalLengthFt: 500,
-    sectionCount: 5,
-    layDirection: isForward ? 'hydrant-to-apparatus' : 'apparatus-to-hydrant',
-    connectedFrom: { objectId: sourceObjectId, portId: isForward ? 'storz' : 'intake-storz' },
-  }
-  return { evolutionId, evolutionInstanceId: instanceId, objects: [hose] }
 }

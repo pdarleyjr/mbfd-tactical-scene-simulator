@@ -1,13 +1,15 @@
 FROM node:24.18.0-bookworm-slim AS build
 WORKDIR /workspace
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json vitest.config.ts ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json tsconfig.json vitest.config.ts postcss.config.mjs ./
 COPY packages ./packages
 COPY apps/web ./apps/web
 RUN pnpm install --frozen-lockfile
-RUN pnpm exec tsc -b packages/domain packages/fire-model packages/collaboration apps/web --pretty false && pnpm --filter @mbfd/web exec vite build
+RUN pnpm exec tsc -b --pretty false && pnpm --filter @mbfd/web exec vite build
 
 FROM caddy:2.10.2-alpine
+ARG APP_RELEASE=development
+ENV APP_RELEASE=${APP_RELEASE}
 COPY Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /workspace/apps/web/dist /srv
 EXPOSE 8080
