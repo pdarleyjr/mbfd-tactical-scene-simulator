@@ -53,7 +53,8 @@
     X-Frame-Options DENY
     Referrer-Policy strict-origin-when-cross-origin
     Permissions-Policy "camera=(), microphone=(), geolocation=()"
-    Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob:; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    # Cloudflare injects its Web Analytics beacon at the edge; allow only that script and its endpoint.
+    Content-Security-Policy "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob: https://cloudflareinsights.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     -Server
   }
 }
