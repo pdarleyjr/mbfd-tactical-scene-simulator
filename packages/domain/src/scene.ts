@@ -82,6 +82,8 @@ export const markerObjectSchema = z.object({
   markerType: markerTypeSchema,
   label: z.string().trim().max(40).default(''),
   radius: z.number().positive().max(5000).optional(),
+  /** Flames and smoke: height relative to width (1 = natural shape), from the stretch handles. */
+  stretch: z.number().min(0.3).max(4).optional(),
 })
 
 export const noteObjectSchema = z.object({

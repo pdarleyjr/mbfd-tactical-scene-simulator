@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downwindDegrees, drawFlame, drawSmoke, effectSeed } from './effects'
+import { downwindDegrees, drawFlame, drawSmoke, effectBounds, effectSeed } from './effects'
 
 const calm = { windFromDeg: null, windNote: '', northDeg: 0, weather: '' }
 
@@ -33,9 +33,9 @@ describe('effect helpers', () => {
 
   it('draws flames and smoke without leaving the canvas in a changed state', () => {
     const flame = fakeContext()
-    drawFlame(flame.ctx, 20, 1.5, 0.3, 6)
-    expect(flame.ctx.save).toHaveBeenCalledTimes(2)
-    expect(flame.ctx.restore).toHaveBeenCalledTimes(2)
+    drawFlame(flame.ctx, 20, 1.5, 0.3)
+    expect(flame.ctx.save).toHaveBeenCalledTimes(3)
+    expect(flame.ctx.restore).toHaveBeenCalledTimes(3)
     expect((flame.ctx.fill as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(10)
     const smoke = fakeContext()
     drawSmoke(smoke.ctx, 20, 1.5, 0.3, 90)
@@ -50,5 +50,22 @@ describe('effect helpers', () => {
     const colors = gradient.addColorStop.mock.calls.map((call) => String(call[1]))
     expect(colors.length).toBeGreaterThan(20)
     for (const color of colors) expect(color).toMatch(/^rgba\(\d+,\d+,\d+,(0|1)(\.\d+)?\)$/)
+  })
+
+  it('grows the tap area with the flame height, and keeps a smoke plume tap area at its base', () => {
+    expect(effectBounds('flame', 10)).toEqual({ x: -9.5, y: -19.5, width: 19, height: 23 })
+    expect(effectBounds('flame', 10, 2).height).toBeCloseTo(42.5, 6)
+    const smoke = effectBounds('smoke', 10, 3)
+    expect(smoke.y).toBeCloseTo(-66, 6)
+    expect(smoke.y + smoke.height).toBeCloseTo(8, 6)
+  })
+
+  it('draws taller flames when stretched', () => {
+    const tall = fakeContext()
+    drawFlame(tall.ctx, 20, 1, 0.5, 2)
+    const normal = fakeContext()
+    drawFlame(normal.ctx, 20, 1, 0.5, 1)
+    const topOf = (ctx: CanvasRenderingContext2D) => Math.min(...(ctx.bezierCurveTo as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[5] as number))
+    expect(topOf(tall.ctx)).toBeLessThan(topOf(normal.ctx) * 1.8)
   })
 })

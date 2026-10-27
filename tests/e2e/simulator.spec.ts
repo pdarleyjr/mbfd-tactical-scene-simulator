@@ -532,7 +532,63 @@ test.describe('Scenarios and fire effects', () => {
     }
   })
 
-  test('places, sizes, and moves flames and a smoke plume that everyone sees', async ({ page, browser }) => {    const sceneId = await open(page)
+  test('rotates and stretches flames and smoke with on-map handles and the inspector', async ({ page }) => {
+    await open(page)
+    await page.keyboard.press('m')
+    await page.locator('[data-marker="flames"]').click()
+    await clickWorld(page, 800, 500)
+    await page.keyboard.press('v')
+    const flame = async () => (await board(page)).objects.find((object: Sim) => object.markerType === 'flames')
+    const start = await flame()
+    await clickWorld(page, 800, 500 - start.radius)
+    await expect(page.getByTestId('inspector')).toHaveAttribute('data-type', 'marker')
+
+    const handle = (name: string) => page.evaluate((anchor) => {
+      const stage = (window as Sim).Konva.stages[0]
+      const box = stage.findOne('Transformer').findOne(`.${anchor}`).getClientRect()
+      const host = document.querySelector('[data-testid="scene-canvas"]')!.getBoundingClientRect()
+      return { x: host.left + box.x + box.width / 2, y: host.top + box.y + box.height / 2 }
+    }, name)
+    const drag = async (from: { x: number; y: number }, dx: number, dy: number) => {
+      await page.mouse.move(from.x, from.y)
+      await page.mouse.down()
+      for (let step = 1; step <= 8; step += 1) await page.mouse.move(from.x + dx * step / 8, from.y + dy * step / 8)
+      await page.mouse.up()
+    }
+
+    // Drag the top handle up: taller flames.
+    await drag(await handle('top-center'), 0, -80)
+    expect((await flame()).stretch).toBeGreaterThan(2)
+    // Drag the round handle around: the flames turn.
+    await drag(await handle('rotater'), 150, 120)
+    expect((await flame()).rotation).toBeGreaterThan(45)
+    // The corner handle resizes evenly (dragged away from the middle, whichever way the flames now face).
+    const before = await flame()
+    const corner = await handle('bottom-right')
+    const middle = await page.evaluate(() => {
+      const box = (window as Sim).Konva.stages[0].findOne('Transformer').getClientRect()
+      const host = document.querySelector('[data-testid="scene-canvas"]')!.getBoundingClientRect()
+      return { x: host.left + box.x + box.width / 2, y: host.top + box.y + box.height / 2 }
+    })
+    const away = Math.hypot(corner.x - middle.x, corner.y - middle.y)
+    await drag(corner, (corner.x - middle.x) / away * 50, (corner.y - middle.y) / away * 50)
+    expect((await flame()).radius).toBeGreaterThan(before.radius * 1.2)
+    expect((await flame()).stretch).toBeCloseTo(before.stretch, 5)
+    // The drawn flames follow.
+    expect(await page.evaluate(() => (window as Sim).Konva.stages[0].findOne('.effect').rotation())).toBeCloseTo((await flame()).rotation, 5)
+
+    // The inspector does the same with numbers.
+    await page.getByTestId('effect-height').fill('150')
+    await expect.poll(async () => (await flame()).stretch).toBeCloseTo(1.5, 5)
+    const rotation = (await flame()).rotation
+    await page.getByRole('button', { name: 'Rotate 15° right' }).click()
+    await expect.poll(async () => (await flame()).rotation).toBeCloseTo((rotation + 15) % 360, 5)
+    await page.keyboard.press('Control+z')
+    await expect.poll(async () => (await flame()).rotation).toBeCloseTo(rotation, 5)
+  })
+
+  test('places, sizes, and moves flames and a smoke plume that everyone sees', async ({ page, browser }) => {
+    const sceneId = await open(page)
     await page.keyboard.press('m')
     await page.locator('[data-marker="flames"]').click()
     await clickWorld(page, 700, 400)

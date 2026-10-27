@@ -81,7 +81,7 @@ function CommonActions({ object }: { object: SceneObject }) {
   )
 }
 
-function RotationControl({ object }: { object: ApparatusObject | ApplianceObject | NozzleObject }) {
+function RotationControl({ object }: { object: ApparatusObject | ApplianceObject | NozzleObject | MarkerObject }) {
   const rotation = Math.round(object.rotation)
   return (
     <Field label="Rotation" hint="Or drag the round handle on the map (snaps every 15°; hold Shift for free).">
@@ -368,12 +368,23 @@ function MarkerInspector({ object }: { object: MarkerObject }) {
         )}
       </Field>
       {object.radius !== undefined && (
-        <Field label={`${definition?.effect ? 'Size' : 'Radius'} ${feetPerUnit ? '(ft)' : '(map units)'}`} hint={feetPerUnit ? (definition?.effect ? 'Or drag the handle on its edge.' : undefined) : 'Calibrate the map to set this in feet.'}>
+        <Field label={`${definition?.effect ? 'Size' : 'Radius'} ${feetPerUnit ? '(ft)' : '(map units)'}`} hint={feetPerUnit ? (definition?.effect ? 'Or drag a corner handle on the map.' : undefined) : 'Calibrate the map to set this in feet.'}>
           {(id) => <input id={id} className="input input--number" type="number" min={1} value={Math.round(feetPerUnit ? object.radius! * feetPerUnit : object.radius!)} onChange={(event) => {
             const value = Number(event.target.value)
             if (value > 0) updateObject<MarkerObject>(object.id, { radius: Math.min(5000, feetPerUnit ? value / feetPerUnit : value) }, 'Resize zone')
           }} />}
         </Field>
+      )}
+      {definition?.effect && (
+        <>
+          <Field label="Height (%)" hint={definition.effect === 'smoke' ? 'How far the plume reaches. Or drag the top handle on the map.' : 'Taller or shorter flames. Or drag the top handle on the map.'}>
+            {(id) => <input id={id} className="input input--number" type="number" min={30} max={400} step={10} value={Math.round((object.stretch ?? 1) * 100)} onChange={(event) => {
+              const value = Number(event.target.value)
+              if (value > 0) updateObject<MarkerObject>(object.id, { stretch: Math.min(4, Math.max(0.3, value / 100)) }, 'Stretch effect')
+            }} data-testid="effect-height" />}
+          </Field>
+          <RotationControl object={object} />
+        </>
       )}
     </>
   )

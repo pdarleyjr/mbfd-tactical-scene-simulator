@@ -27,6 +27,7 @@ import {
   type Vec,
 } from '@mbfd/fire-model'
 import { sceneContext, useBoard } from '../store/board'
+import { downwindDegrees } from './effects'
 import { useUi, type Draft } from '../store/ui'
 
 /** Snap distance in screen pixels; generous for fingers. */
@@ -304,7 +305,9 @@ export function placeAt(point: Vec) {
     return hydrant
   }
   if (ui.tool === 'marker') {
-    const marker = createMarker(ui.markerType, point, board.board.scenario.calibration?.feetPerWorldUnit)
+    const created = createMarker(ui.markerType, point, board.board.scenario.calibration?.feetPerWorldUnit)
+    // Smoke starts out drifting downwind; it can then be rotated freely like flames.
+    const marker = created.markerType === 'smoke' ? { ...created, rotation: downwindDegrees(board.board.scenario.conditions) } : created
     board.commit([...objects, marker], 'Place marker')
     return marker
   }
