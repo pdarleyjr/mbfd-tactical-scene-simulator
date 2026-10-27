@@ -5,6 +5,11 @@
     "sha256": "50979d2c7ede723c15e57e177b14ee60308afaf01fd8e744dd16bc5600e22e90"
   },
   {
+    "path": "data/assets/source/aerial_view_oceanfront_condo.png",
+    "bytes": 1064685,
+    "sha256": "63f7a9e8078c967db46204c18e9d7a4d8341abcaea7110d245be75310887bf72"
+  },
+  {
     "path": "data/assets/source/house_fire_video.mp4",
     "bytes": 25149664,
     "sha256": "58bc266bdc75916914a53d603f305b02e20da058ad8193ca1b851a3df2783128"
@@ -63,6 +68,16 @@
     "path": "apps/web/public/scenario-assets/seed/initial-conditions.mp4",
     "bytes": 6098089,
     "sha256": "17f2c016395947e8777844a7d55f36eed01f358dacfac2b1ca6f3cf95f3d148c"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/oceanfront-background-thumb.webp",
+    "bytes": 90656,
+    "sha256": "5e5cb0e16ace205b7684d7850041bbb6f834e5ecde70933c9b424c3003340bb3"
+  },
+  {
+    "path": "apps/web/public/scenario-assets/seed/oceanfront-background.webp",
+    "bytes": 468588,
+    "sha256": "c8e82809132c2a93490cfb30156243c3490d69f3b3e7763deb024a6a4445093c"
   },
   {
     "path": "apps/web/public/scenario-assets/seed/apparatus/E1.webp",

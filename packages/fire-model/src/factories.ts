@@ -11,6 +11,7 @@ import {
   type SceneObject,
 } from '@mbfd/domain'
 import { translatePoints } from './geometry.js'
+import { UNCALIBRATED_UNITS_PER_FT } from './ports.js'
 
 export function newId(): string {
   return crypto.randomUUID()
@@ -37,9 +38,16 @@ export function createHydrant(at: { x: number; y: number }, objects: readonly Sc
   return { id: newId(), type: 'hydrant', label: nextHydrantLabel(objects), status: 'unknown', notes: '', x: at.x, y: at.y, rotation: 0, locked: false }
 }
 
-export function createMarker(markerType: MarkerType, at: { x: number; y: number }): MarkerObject {
+/** Starting radius in map units: zones use a fixed size, flames and smoke a real size in feet. */
+export function defaultMarkerRadius(markerType: MarkerType, feetPerUnit?: number): number | undefined {
   const marker = findMarker(markerType)
-  return { id: newId(), type: 'marker', markerType, label: '', x: at.x, y: at.y, rotation: 0, locked: false, ...(marker?.area ? { radius: 90 } : {}) }
+  if (marker?.effect) return Math.min(5000, (marker.sizeFt ?? 10) / (feetPerUnit ?? 1 / UNCALIBRATED_UNITS_PER_FT))
+  return marker?.area ? 90 : undefined
+}
+
+export function createMarker(markerType: MarkerType, at: { x: number; y: number }, feetPerUnit?: number): MarkerObject {
+  const radius = defaultMarkerRadius(markerType, feetPerUnit)
+  return { id: newId(), type: 'marker', markerType, label: '', x: at.x, y: at.y, rotation: 0, locked: false, ...(radius ? { radius } : {}) }
 }
 
 export function createNote(at: { x: number; y: number }, text = 'Note'): NoteObject {

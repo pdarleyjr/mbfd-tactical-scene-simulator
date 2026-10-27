@@ -36,6 +36,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Map WebP conversion failed.' }
 & magick $mapSource -colorspace sRGB -resize '640x640>' -depth 8 -quality 84 (Join-Path $seedRoot 'background-thumb.webp')
 if ($LASTEXITCODE -ne 0) { throw 'Map thumbnail conversion failed.' }
 
+# Oceanfront Condominium scenario: map only (no video). Upscaled 2x with Lanczos;
+# the template's calibration is measured on the 2x map.
+$oceanfrontSource = Join-Path $SourceDirectory 'aerial_view_oceanfront_condo.png'
+if (Test-Path -LiteralPath $oceanfrontSource) {
+  if ($SourceDirectory -ne $sourceRoot) { Copy-Item -LiteralPath $oceanfrontSource -Destination (Join-Path $sourceRoot 'aerial_view_oceanfront_condo.png') -Force }
+  & magick $oceanfrontSource -colorspace sRGB -filter Lanczos -resize 200% -depth 8 -quality 92 (Join-Path $seedRoot 'oceanfront-background.webp')
+  if ($LASTEXITCODE -ne 0) { throw 'Oceanfront map conversion failed.' }
+  & magick $oceanfrontSource -colorspace sRGB -resize '640x640>' -depth 8 -quality 84 (Join-Path $seedRoot 'oceanfront-background-thumb.webp')
+  if ($LASTEXITCODE -ne 0) { throw 'Oceanfront thumbnail conversion failed.' }
+}
+
 foreach ($designation in @('E1', 'E2', 'E3', 'E4', 'L1', 'L3')) {
   $source = Join-Path $SourceDirectory "apparatus\$designation.png"
   if (!(Test-Path -LiteralPath $source)) { $source = Join-Path $SourceDirectory "$designation.png" }

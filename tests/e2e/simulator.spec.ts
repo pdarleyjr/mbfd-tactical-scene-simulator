@@ -472,3 +472,99 @@ test.describe('Shared live scenes', () => {
     }
   })
 })
+
+test.describe('Scenarios and fire effects', () => {
+  async function switchTo(page: Page, templateId: string) {
+    await page.getByTestId('scene-title').click()
+    await page.getByTestId(`switch-to-${templateId}`).click()
+  }
+
+  test('switching scenario moves everyone, and each scenario keeps its own work', async ({ page, browser }) => {
+    const sceneId = await open(page)
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    const other = await context.newPage()
+    try {
+      await open(other, sceneId)
+      await placeUnit(page, 'E1', 900, 600)
+
+      await switchTo(page, 'oceanfront-condo')
+      await expect.poll(async () => (await board(other)).templateId).toBe('oceanfront-condo')
+      await expect(other.getByTestId('scene-title')).toContainText('Oceanfront Condominium')
+      await expect.poll(async () => (await board(page)).templateId).toBe('oceanfront-condo')
+      expect((await board(page)).scenario.video).toBeUndefined()
+      expect(await unitOf(page, 'E1')).toBeUndefined()
+      await placeUnit(other, 'L1', 800, 700)
+      await expect.poll(async () => Boolean(await unitOf(page, 'L1'))).toBe(true)
+
+      // Back to the Waterfront: its work is exactly as it was, untouched by the other scenario.
+      await page.waitForTimeout(2100)
+      await switchTo(other, 'waterfront-estate')
+      await expect.poll(async () => (await board(page)).templateId).toBe('waterfront-estate')
+      await expect.poll(async () => (await unitOf(page, 'E1'))?.x).toBeCloseTo(900, 0)
+      expect(await unitOf(page, 'L1')).toBeUndefined()
+      expect((await board(page)).objects.filter((object: Sim) => object.type === 'hydrant').map((object: Sim) => object.label)).toEqual(['H1'])
+
+      await page.waitForTimeout(2100)
+      await switchTo(page, 'oceanfront-condo')
+      await expect.poll(async () => Boolean(await unitOf(other, 'L1'))).toBe(true)
+      expect(await unitOf(other, 'E1')).toBeUndefined()
+    } finally {
+      await context.close()
+    }
+  })
+
+  test('a device that was offline during a switch rejoins on the new scenario without carrying old edits into it', async ({ page, browser }) => {
+    const sceneId = await open(page)
+    const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+    const other = await context.newPage()
+    try {
+      await open(other, sceneId)
+      await page.evaluate(() => (window as Sim).__sim.dropConnection())
+      await placeUnit(page, 'E3', 760, 560)
+      await switchTo(other, 'oceanfront-condo')
+      await expect(page.locator('.app[data-live="live"]')).toBeVisible({ timeout: 15_000 })
+      await expect.poll(async () => (await board(page)).templateId).toBe('oceanfront-condo')
+      await page.waitForTimeout(500)
+      expect(await unitOf(page, 'E3')).toBeUndefined()
+      expect(await unitOf(other, 'E3')).toBeUndefined()
+    } finally {
+      await context.close()
+    }
+  })
+
+  test('places, sizes, and moves flames and a smoke plume that everyone sees', async ({ page, browser }) => {    const sceneId = await open(page)
+    await page.keyboard.press('m')
+    await page.locator('[data-marker="flames"]').click()
+    await clickWorld(page, 700, 400)
+    await page.locator('[data-marker="smoke"]').click()
+    await clickWorld(page, 820, 380)
+    await page.keyboard.press('Escape')
+    const effects = (await board(page)).objects.filter((object: Sim) => object.type === 'marker' && ['flames', 'smoke'].includes(object.markerType))
+    expect(effects.map((object: Sim) => object.markerType)).toEqual(['flames', 'smoke'])
+    // Real-world sizes: 12 ft and 18 ft radius on the calibrated map.
+    const feetPerUnit = (await board(page)).scenario.calibration.feetPerWorldUnit
+    expect(effects[0].radius * feetPerUnit).toBeCloseTo(12, 5)
+    expect(effects[1].radius * feetPerUnit).toBeCloseTo(18, 5)
+    await expect.poll(() => page.evaluate(() => (window as Sim).__sim.rendered('effect'))).toBe(2)
+
+    // Tap to select, drag to move, and set the size in feet.
+    await page.keyboard.press('v')
+    await dragWorld(page, [700, 400], [740, 440])
+    const flame = (await board(page)).objects.find((object: Sim) => object.markerType === 'flames')
+    expect(flame.x).toBeGreaterThan(720)
+    await expect(page.getByTestId('inspector')).toHaveAttribute('data-type', 'marker')
+    const size = page.getByTestId('inspector').getByLabel(/Size/)
+    await size.fill('20')
+    await expect.poll(async () => (await board(page)).objects.find((object: Sim) => object.markerType === 'flames').radius * feetPerUnit).toBeCloseTo(20, 1)
+
+    // The classroom display shows them too.
+    const context = await browser.newContext({ viewport: { width: 1600, height: 900 } })
+    const tv = await context.newPage()
+    try {
+      await open(tv, sceneId, '?view=present')
+      await expect.poll(() => tv.evaluate(() => (window as Sim).__sim.rendered('effect'))).toBe(2)
+    } finally {
+      await context.close()
+    }
+  })
+})

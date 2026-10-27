@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import { applyScenePatch, diffBoards, isEmptyPatch, MAIN_SCENE_ID, newSceneId, sceneIdSchema, withoutPendingChanges, type Board, type ClientMessage, type ScenePatch, type ServerMessage } from '@mbfd/domain'
+import { applyScenePatch, diffBoards, isEmptyPatch, MAIN_SCENE_ID, newSceneId, scenarioKey, sceneIdSchema, withoutPendingChanges, type Board, type ClientMessage, type ScenePatch, type ServerMessage } from '@mbfd/domain'
 import { setClockOffset, useBoard } from '../store/board'
 import { useUi } from '../store/ui'
+import { canvasApi } from '../canvas/api'
 
 /**
  * Live shared scenes. Everyone who opens the same link works on one scene:
@@ -101,7 +102,7 @@ export function flushLive() {
   if (isEmptyPatch(patch)) return
   const id = String(++messageCounter)
   inflight.set(id, patch)
-  send({ type: 'patch', id, patch })
+  send({ type: 'patch', id, patch, on: scenarioKey(board) })
 }
 
 function scheduleSend() {
@@ -136,6 +137,21 @@ function onState(message: Extract<ServerMessage, { type: 'state' }>) {
   setClockOffset(message.now - Date.now())
   // Changes the server never confirmed, and edits made while disconnected, go back on top of its state.
   const local = useBoard.getState().board
+  // The scene switched scenario while this browser was away: edits made on the old one must not land on the new one.
+  const switchedAway = scenarioKey(message.board) !== scenarioKey(local)
+  if (switchedAway) {
+    discardOnResync = false
+    inflight.clear()
+    shadow = message.board
+    joined = true
+    if (!everJoined && message.peers > 1) useLive.setState({ arrivedToCompany: true })
+    const wasJoined = everJoined
+    everJoined = true
+    retries = 0
+    showNewBoard(message.board, local, wasJoined ? `The scene switched to ${message.board.scenario.title} while you were disconnected.` : undefined)
+    useLive.setState({ connection: 'live', peers: message.peers })
+    return
+  }
   const pending = discardOnResync ? [] : [...inflight.values(), shadow ? diffBoards(shadow, local) : {}].filter((patch) => !isEmptyPatch(patch))
   const merged = pending.reduce((board, patch) => applyScenePatch(board, patch), message.board)
   if (discardOnResync) useUi.getState().toast('Some changes could not be saved, so the scene was reloaded from the server.', 'warning')
@@ -163,6 +179,42 @@ function onRemotePatch(patch: ScenePatch) {
   if (remote.training) announceNewInjects(before, useBoard.getState().board)
 }
 
+/** Shows a whole new board (switch, restore, or a switch missed while away): fresh history, tools reset, map refit. */
+function showNewBoard(board: Board, before: Board, message: string | undefined) {
+  if (sendTimer) { clearTimeout(sendTimer); sendTimer = undefined }
+  quietly(() => useBoard.getState().replaceRemote(board))
+  shadow = useBoard.getState().board
+  const ui = useUi.getState()
+  ui.select([])
+  if (scenarioKey(board) !== scenarioKey(before)) {
+    ui.setTool('select')
+    ui.setReviewing(false)
+    ui.setCompareSnapshot(null)
+    ui.showInjectBanner(null)
+  }
+  if (message) ui.toast(message, 'info')
+  // A different map needs fitting to the screen again.
+  const { world } = board.scenario
+  if (world.width !== before.scenario.world.width || world.height !== before.scenario.world.height) setTimeout(() => canvasApi.current?.fit(), 80)
+}
+
+function onReplace(message: Extract<ServerMessage, { type: 'replace' }>) {
+  inflight.clear()
+  const title = message.board.scenario.title
+  const text = message.reason !== 'switch' ? 'A saved version of the scene was restored.'
+    : message.from === clientId ? `Everyone is now on ${title}. The other scenario was kept: switch back any time.`
+    : `Switched to ${title} for everyone in this scene.`
+  showNewBoard(message.board, useBoard.getState().board, text)
+}
+
+/** Switches everyone in this scene to another scenario. Returns false when not connected. */
+export function sendScenarioSwitch(seedBoard: Board): boolean {
+  if (!joined || socket?.readyState !== WebSocket.OPEN) return false
+  flushLive()
+  send({ type: 'switch', id: String(++messageCounter), key: scenarioKey(seedBoard), seed: seedBoard })
+  return true
+}
+
 function handle(message: ServerMessage) {
   lastHeardAt = Date.now()
   switch (message.type) {
@@ -173,12 +225,7 @@ function handle(message: ServerMessage) {
       onRemotePatch(message.patch)
       return
     case 'replace':
-      if (sendTimer) { clearTimeout(sendTimer); sendTimer = undefined }
-      inflight.clear()
-      quietly(() => useBoard.getState().replaceRemote(message.board))
-      shadow = useBoard.getState().board
-      useUi.getState().select([])
-      useUi.getState().toast('A saved version of the scene was restored.', 'info')
+      onReplace(message)
       return
     case 'ack':
       inflight.delete(message.id)

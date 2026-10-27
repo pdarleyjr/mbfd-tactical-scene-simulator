@@ -229,9 +229,19 @@ function MarkerTray() {
   const markerType = useUi((state) => state.markerType)
   const setMarkerType = useUi((state) => state.setMarkerType)
   return (
-    <Tray title="Markers" hint="Choose a marker, then tap the map." testId="marker-tray">
+    <Tray title="Markers" hint="Choose a marker, then tap the map. Flames and smoke can be resized from their edge." testId="marker-tray">
+      <h3 className="tray__subhead">Fire and smoke</h3>
       <div className="marker-grid">
-        {markerCatalog.map((marker) => (
+        {markerCatalog.filter((marker) => marker.effect).map((marker) => (
+          <button key={marker.id} type="button" className={`marker-option ${markerType === marker.id ? 'is-active' : ''}`} aria-pressed={markerType === marker.id} onClick={() => setMarkerType(marker.id)} data-marker={marker.id}>
+            <span className={`marker-option__badge marker-option__badge--${marker.effect}`} aria-hidden />
+            <span>{marker.label}</span>
+          </button>
+        ))}
+      </div>
+      <h3 className="tray__subhead">Markers</h3>
+      <div className="marker-grid">
+        {markerCatalog.filter((marker) => !marker.effect).map((marker) => (
           <button key={marker.id} type="button" className={`marker-option ${markerType === marker.id ? 'is-active' : ''}`} aria-pressed={markerType === marker.id} onClick={() => setMarkerType(marker.id)} data-marker={marker.id}>
             <span className="marker-option__badge" style={{ background: marker.color, color: ['victim', 'division', 'ventilation', 'entry'].includes(marker.id) ? '#0b1013' : '#fff' }}>{marker.code}</span>
             <span>{marker.label}</span>

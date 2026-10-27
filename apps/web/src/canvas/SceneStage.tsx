@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Group, Image, Layer, Line, Rect, Stage, Transformer } from 'react-konva'
 import Konva from 'konva'
-import { apparatusCatalog, isPathObject, type HoseObject, type MeasurementObject, type SceneObject } from '@mbfd/domain'
+import { apparatusCatalog, findMarker, isPathObject, type HoseObject, type MarkerObject, type MeasurementObject, type SceneObject } from '@mbfd/domain'
 import {
   apparatusSize,
   boundsOfPoints,
@@ -31,6 +31,8 @@ import { HoseNode } from './nodes/HoseNode'
 import { ArrowNode, HydrantNode, MarkerNode, MeasurementNode, NoteNode, NozzleNode, WyeNode } from './nodes/SymbolNodes'
 import { PathHandles, RadiusHandle } from './overlays/EditHandles'
 import { DraftOverlay } from './overlays/DraftOverlay'
+import { EffectsLayer } from './nodes/EffectsLayer'
+import { downwindDegrees } from './effects'
 
 Konva.dragDistance = 5
 Konva.hitOnDragEnabled = false
@@ -499,10 +501,14 @@ export function SceneStage() {
   const apparatus: SceneObject[] = []
   const hoses: SceneObject[] = []
   const symbols: SceneObject[] = []
+  const effects: MarkerObject[] = []
   for (const object of objects) {
     if (object.type === 'apparatus') apparatus.push(object)
     else if (object.type === 'hose') hoses.push(object)
-    else symbols.push(object)
+    else {
+      symbols.push(object)
+      if (object.type === 'marker' && findMarker(object.markerType)?.effect) effects.push(object)
+    }
   }
 
   return (
@@ -528,6 +534,7 @@ export function SceneStage() {
             {background && <Image image={background} width={world.width} height={world.height} />}
             {!background && <Rect width={world.width} height={world.height} fill={backgroundFailed ? '#2a1a18' : '#1a242a'} />}
           </Layer>
+          {layers.markers && effects.length > 0 && <EffectsLayer effects={effects} downwindDeg={downwindDegrees(scenario.conditions)} />}
           <InteractionContext.Provider value={interaction}>
             <Layer listening={interactive}>
               {apparatus.map((object) => object.type === 'apparatus' && (

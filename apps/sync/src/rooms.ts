@@ -1,4 +1,4 @@
-import { applyScenePatch, isEmptyPatch, MAX_SCENE_OBJECTS, sceneIdSchema, type Board, type ScenePatch, type ServerMessage } from '@mbfd/domain'
+import { applyScenePatch, isEmptyPatch, MAX_SCENE_OBJECTS, scenarioKey, sceneIdSchema, type Board, type ScenePatch, type ServerMessage } from '@mbfd/domain'
 import type { SceneFiles } from './files.js'
 
 /** A connected browser, reduced to what a room needs. */
@@ -28,6 +28,7 @@ export class Room {
   private firstUnsavedAt: number | undefined
   private lastSnapshotAt = Date.now()
   private lastSnapshotVersion: number
+  private swapping: Promise<unknown> = Promise.resolve()
 
   constructor(
     readonly id: string,
@@ -55,8 +56,10 @@ export class Room {
     if (this.peers.size === 0) this.flushSafely('Last person left')
   }
 
-  applyPatch(peer: Peer, opId: string, patch: ScenePatch) {
-    if (!isEmptyPatch(patch)) {
+  applyPatch(peer: Peer, opId: string, patch: ScenePatch, on: string) {
+    // Made on a scenario the scene has since switched away from: drop it rather than mix scenarios.
+    const stale = on !== scenarioKey(this.board)
+    if (!stale && !isEmptyPatch(patch)) {
       const next = applyScenePatch(this.board, patch)
       if (next.objects.length > MAX_SCENE_OBJECTS) {
         peer.send({ type: 'error', id: opId, message: `A scene can hold up to ${MAX_SCENE_OBJECTS} objects. That change was not applied.` })
@@ -70,16 +73,58 @@ export class Room {
     peer.send({ type: 'ack', id: opId, version: this.version })
   }
 
-  /** Whole-scene replacement, used when a saved version is restored. */
-  async replace(from: string, board: Board, reason: string) {
-    await this.snapshotNow(`Before ${reason.toLowerCase()}`)
-    this.board = { ...board, id: this.board.id, updatedAt: new Date().toISOString() }
-    this.version += 1
-    this.broadcast({ type: 'replace', from, version: this.version, board: this.board })
-    this.scheduleSave()
-    return this.version
+  /** Whole-board swaps (restore, switch) run one at a time. */
+  private exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.swapping.catch(() => undefined).then(task)
+    this.swapping = run
+    return run
   }
 
+  /**
+   * Swaps in a whole board for everyone. The swap and broadcast happen in one
+   * step so no change can slip in between. When the scenario changes, the
+   * previous board is parked under its own scenario first (queued before any
+   * wait, so it is written even if the snapshot fails). The snapshot is
+   * best-effort and skipped when nothing changed since the last one.
+   */
+  private async swap(from: string, board: Board, reason: 'restore' | 'switch', snapshotReason: string) {
+    const previous = this.current
+    const unsnapshotted = previous.version !== this.lastSnapshotVersion
+    this.board = { ...board, id: this.board.id, updatedAt: new Date().toISOString() }
+    this.version += 1
+    this.broadcast({ type: 'replace', from, version: this.version, board: this.board, reason })
+    this.scheduleSave()
+    const parking = scenarioKey(previous.board) !== scenarioKey(board) ? this.files.park(this.id, scenarioKey(previous.board), previous.board) : undefined
+    if (unsnapshotted || reason === 'restore') {
+      await this.files.snapshot(this.id, previous, snapshotReason).then(
+        () => { this.lastSnapshotAt = Date.now() },
+        (error: unknown) => console.error(`Snapshot before ${reason} failed for scene ${this.id}`, error),
+      )
+    }
+    await parking
+  }
+
+  /** Puts a saved version back for everyone. A different scenario's work is parked, not lost. */
+  replace(from: string, board: Board, reason: string) {
+    return this.exclusive(async () => {
+      await this.swap(from, board, 'restore', `Before ${reason.toLowerCase()}`)
+      return this.version
+    })
+  }
+
+  /**
+   * Switches everyone to another scenario. The current one is parked and comes
+   * back exactly as it was when someone switches back; a scenario never opened
+   * here before starts from `seed` (its original template).
+   */
+  switchScenario(from: string, key: string, seed: Board) {
+    return this.exclusive(async () => {
+      if (key === scenarioKey(this.board)) return this.version
+      const target = (await this.files.loadParked(this.id, key)) ?? seed
+      await this.swap(from, target, 'switch', `Before switching to ${target.scenario.title}`.slice(0, 160))
+      return this.version
+    })
+  }
   broadcast(message: ServerMessage, except?: Peer) {
     for (const peer of this.peers) if (peer !== except) peer.send(message)
   }
