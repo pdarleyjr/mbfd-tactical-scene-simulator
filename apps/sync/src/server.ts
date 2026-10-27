@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage } from 'node:http'
 import path from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
-import { clientMessageSchema, sceneIdSchema, type ServerMessage } from '@mbfd/domain'
+import { clientMessageSchema, scenarioKey, sceneIdSchema, type ServerMessage } from '@mbfd/domain'
 import { SceneFiles } from './files.js'
 import { MediaStore, json } from './media.js'
 import { RoomManager, defaultTiming, type Peer, type Room, type RoomTiming } from './rooms.js'
@@ -18,6 +18,7 @@ const MESSAGES_PER_SECOND = 80
 const BYTES_PER_SECOND = 16 * 1024 * 1024
 const MAX_MESSAGE_BYTES = 4 * 1024 * 1024
 const RESTORE_INTERVAL_MS = 10_000
+const SWITCH_INTERVAL_MS = 2_000
 
 /** The visitor's address as Cloudflare and Caddy report it, for per-address limits. */
 function clientAddress(request: IncomingMessage): string {
@@ -35,6 +36,7 @@ export function createSyncServer(options: SyncOptions) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES })
   const connectionsByAddress = new Map<string, number>()
   const lastRestore = new Map<string, number>()
+  const lastSwitch = new Map<string, number>()
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost')
@@ -56,6 +58,10 @@ export function createSyncServer(options: SyncOptions) {
             lastRestore.set(id, Date.now())
             const room = rooms.get(id)
             if (room) return json(response, 200, { version: await room.replace('server', board, 'Restore') })
+            // Nobody is in the scene: keep a different scenario's work parked before restoring over it.
+            const stored = await files.load(id)
+            if (stored && scenarioKey(stored.board) !== scenarioKey(board)) await files.park(id, scenarioKey(stored.board), stored.board)
+            if (stored) await files.snapshot(id, stored, 'Before restore')
             await files.save(id, { board, version: Date.now() })
             return json(response, 200, { version: 0 })
           }
@@ -106,10 +112,16 @@ export function createSyncServer(options: SyncOptions) {
       count += 1
       bytes += data.length
       let parsed
-      try { parsed = clientMessageSchema.safeParse(JSON.parse(String(data))) } catch { parsed = undefined }
+      let raw: unknown
+      try { raw = JSON.parse(String(data)); parsed = clientMessageSchema.safeParse(raw) } catch { parsed = undefined }
       const id = parsed?.success && parsed.data.type === 'patch' ? parsed.data.id : undefined
       if (count > MESSAGES_PER_SECOND || bytes > BYTES_PER_SECOND) { send({ type: 'error', id, message: 'Too many changes at once; the scene was reloaded.' }); return }
-      if (!parsed?.success) { send({ type: 'error', message: 'That change could not be read and was not applied.' }); return }
+      if (!parsed?.success) {
+        // A tab still running the previous release sends changes without naming their scenario.
+        const outdated = raw !== null && typeof raw === 'object' && (raw as { type?: unknown }).type === 'patch' && !('on' in raw)
+        send({ type: 'error', message: outdated ? 'This page is out of date. Reload it to keep working.' : 'That change could not be read and was not applied.' })
+        return
+      }
       const message = parsed.data
       try {
         if (message.type === 'ping') { send({ type: 'pong', now: Date.now() }); return }
@@ -126,7 +138,14 @@ export function createSyncServer(options: SyncOptions) {
           return
         }
         if (!room || !peer) { send({ type: 'error', id: message.id, message: 'Not connected to a scene yet.' }); return }
-        room.applyPatch(peer, message.id, message.patch)
+        if (message.type === 'switch') {
+          if (Date.now() - (lastSwitch.get(sceneId) ?? 0) < SWITCH_INTERVAL_MS) { send({ type: 'error', message: 'The scenario was just switched. Try again in a moment.' }); return }
+          lastSwitch.set(sceneId, Date.now())
+          const version = await room.switchScenario(peer.id, message.key, message.seed)
+          send({ type: 'ack', id: message.id, version })
+          return
+        }
+        room.applyPatch(peer, message.id, message.patch, message.on)
       } catch (error) {
         console.error('Message failed', error)
         send({ type: 'error', id, message: error instanceof Error ? error.message : 'That change could not be applied.' })

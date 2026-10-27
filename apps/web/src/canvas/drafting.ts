@@ -304,7 +304,7 @@ export function placeAt(point: Vec) {
     return hydrant
   }
   if (ui.tool === 'marker') {
-    const marker = createMarker(ui.markerType, point)
+    const marker = createMarker(ui.markerType, point, board.board.scenario.calibration?.feetPerWorldUnit)
     board.commit([...objects, marker], 'Place marker')
     return marker
   }

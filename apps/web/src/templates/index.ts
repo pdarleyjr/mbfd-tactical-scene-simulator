@@ -1,10 +1,11 @@
 import { SCENE_SCHEMA_VERSION, type Board, type Scenario, type SceneObject } from '@mbfd/domain'
 import type { ScenarioTemplate } from './types'
 import { waterfrontEstate } from './waterfront-estate'
+import { oceanfrontCondo } from './oceanfront-condo'
 
 export type { ScenarioTemplate }
 
-export const templates: readonly ScenarioTemplate[] = [waterfrontEstate]
+export const templates: readonly ScenarioTemplate[] = [waterfrontEstate, oceanfrontCondo]
 export const defaultTemplate = templates[0]!
 
 export function findTemplate(id: string | null | undefined): ScenarioTemplate | undefined {

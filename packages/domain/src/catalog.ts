@@ -129,7 +129,7 @@ export const legacyHoseLoads: HoseLoadSettings = {
 
 export type MarkerType =
   | 'command-post' | 'staging' | 'rit' | 'rehab' | 'entry' | 'victim'
-  | 'hazard' | 'fire' | 'exposure' | 'ventilation' | 'collapse-zone' | 'division'
+  | 'hazard' | 'fire' | 'flames' | 'smoke' | 'exposure' | 'ventilation' | 'collapse-zone' | 'division'
 
 export interface MarkerDefinition {
   id: MarkerType
@@ -138,6 +138,10 @@ export interface MarkerDefinition {
   color: string
   /** Area markers carry a radius and render as a zone. */
   area?: boolean
+  /** Animated scene effects: drawn on the map instead of a badge, sized by their radius. */
+  effect?: 'flame' | 'smoke'
+  /** Starting radius of an effect, in feet. */
+  sizeFt?: number
 }
 
 export const markerCatalog: readonly MarkerDefinition[] = [
@@ -149,6 +153,8 @@ export const markerCatalog: readonly MarkerDefinition[] = [
   { id: 'victim', label: 'Victim', code: 'VIC', color: '#e8eaeb' },
   { id: 'hazard', label: 'Hazard', code: 'HAZ', color: '#f08a24' },
   { id: 'fire', label: 'Fire location', code: 'FIRE', color: '#e2361f' },
+  { id: 'flames', label: 'Flames', code: 'FLM', color: '#ff7a1a', effect: 'flame', sizeFt: 12 },
+  { id: 'smoke', label: 'Smoke plume', code: 'SMK', color: '#8d969b', effect: 'smoke', sizeFt: 18 },
   { id: 'exposure', label: 'Exposure', code: 'EXP', color: '#b06ad6' },
   { id: 'ventilation', label: 'Ventilation', code: 'VENT', color: '#7ab8d9' },
   { id: 'division', label: 'Division / side', code: 'DIV', color: '#d9c8a5' },

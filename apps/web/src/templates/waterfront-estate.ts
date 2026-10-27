@@ -31,6 +31,7 @@ export const waterfrontCalibration: Calibration = {
 export const waterfrontEstate: ScenarioTemplate = {
   id: 'waterfront-estate',
   version: 1,
+  thumbnailUrl: '/scenario-assets/seed/background-thumb.webp',
   scenario: {
     title: 'Residential Structure Fire — Waterfront Estate',
     description: 'A rendered residential structure-fire scene for multi-company tactical training.',

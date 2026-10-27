@@ -94,6 +94,22 @@ export const MarkerNode = memo(function MarkerNode({ object, selected, inv, feet
   const darkText = ['victim', 'division', 'ventilation', 'entry'].includes(object.markerType)
   const code = definition?.code ?? '?'
   const radius = object.radius
+  if (definition?.effect) {
+    // The flame or smoke itself is drawn by the effects layer; this is what you tap and drag.
+    const reach = radius ?? 20
+    return (
+      <Group {...handlers} name="scene-object marker effect-target" x={object.x} y={object.y}>
+        <Circle radius={reach} fill="#000" opacity={0.001} />
+        {selected && <Circle radius={reach} stroke={ink.select} strokeWidth={2} dash={[8, 5]} strokeScaleEnabled={false} />}
+        {object.label && (
+          <Label x={0} y={reach + 4 * inv} scaleX={s} scaleY={s} listening={false}>
+            <Tag fill="rgba(11,16,19,0.86)" stroke={color} strokeWidth={1} cornerRadius={3} pointerDirection="up" pointerWidth={6} pointerHeight={4} />
+            <Text text={object.label} fontFamily="Barlow" fontStyle="600" fontSize={12} padding={3} fill={ink.labelText} />
+          </Label>
+        )}
+      </Group>
+    )
+  }
   return (
     <Group {...handlers} name="scene-object marker" x={object.x} y={object.y}>
       {radius && (

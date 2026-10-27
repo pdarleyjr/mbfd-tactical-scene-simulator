@@ -270,6 +270,8 @@ textarea.input { resize: vertical; line-height: 1.4; }
 .marker-option:hover { background: var(--surface-3); }
 .marker-option.is-active { border-color: var(--blue); background: rgba(47, 143, 224, 0.18); }
 .marker-option__badge { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; border: 2px solid #0b1013; font-family: var(--display); font-weight: 700; font-size: 10.5px; }
+.marker-option__badge--flame { background: radial-gradient(circle at 50% 78%, #fff6c4 0 14%, #ffc23a 30%, #f26a12 56%, #b5230c 80%); }
+.marker-option__badge--smoke { background: radial-gradient(circle at 38% 62%, #2c2d2f 0 22%, #6d7275 52%, #a7adb0 82%); }
 
 .swatches { display: flex; gap: 10px; }
 .swatches button { width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--surface-solid); box-shadow: 0 0 0 1px var(--line-strong); }
@@ -525,7 +527,14 @@ textarea.input { resize: vertical; line-height: 1.4; }
 
 .library__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .library__heading { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
-.library__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.scenario-picker { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+.scenario-card { display: flex; align-items: center; gap: 14px; padding: 8px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); }
+.scenario-card.is-current { border-color: var(--blue); background: rgba(47, 143, 224, 0.12); }
+.scenario-card__thumb { width: 120px; height: 78px; flex: none; object-fit: cover; border-radius: var(--radius-sm); background: #0d1418; }
+.scenario-card__meta { flex: 1; display: grid; gap: 3px; min-width: 0; }
+.scenario-card__meta strong { font-size: 16px; }
+.scenario-card__meta span { font-size: 13px; color: var(--text-3); }
+.scenario-card__badge { padding: 4px 10px; border-radius: 999px; background: var(--blue); color: #fff; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }.library__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .board-card { display: flex; align-items: center; gap: 14px; padding: 8px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface-2); }
 .board-card.is-current { border-color: var(--blue); }
 .board-card__thumb { width: 136px; height: 85px; flex: none; padding: 0; border: 0; border-radius: var(--radius-sm); overflow: hidden; background: #0d1418; }
@@ -588,6 +597,8 @@ textarea.input { resize: vertical; line-height: 1.4; }
   .toasts { bottom: calc(var(--safe-bottom) + 170px); }
   .edit-row, .edit-row--two { grid-template-columns: 1fr 42px; }
   .board-card { flex-wrap: wrap; }
+  .scenario-card { flex-wrap: wrap; }
+  .scenario-card__thumb { width: 100%; height: 120px; }
   .board-card__thumb { width: 100%; height: 120px; }
   .length-grid__item--wide { grid-column: auto; }
 }

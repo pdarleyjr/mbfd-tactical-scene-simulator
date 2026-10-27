@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyScenePatch, clientMessageSchema, diffBoards, isEmptyPatch, newSceneId, sceneIdSchema, withoutPendingChanges } from './sync.js'
+import { applyScenePatch, clientMessageSchema, diffBoards, isEmptyPatch, newSceneId, scenarioKey, sceneIdSchema, withoutPendingChanges } from './sync.js'
 import type { Board, SceneObject } from './scene.js'
 
 const note = (id: string, x = 0, text = id): SceneObject => ({ id, type: 'note', x, y: 0, rotation: 0, text, locked: false })
@@ -149,11 +149,24 @@ describe('withoutPendingChanges', () => {
   })
 })
 describe('client messages', () => {
+  it('accepts a scenario switch only with a matching starting board', () => {
+    const seedFor = (templateId: string | null) => ({ ...board(), templateId })
+    expect(clientMessageSchema.safeParse({ type: 'switch', id: '1', key: 'oceanfront-condo', seed: seedFor('oceanfront-condo') }).success).toBe(true)
+    expect(clientMessageSchema.safeParse({ type: 'switch', id: '1', key: 'oceanfront-condo', seed: seedFor('waterfront-estate') }).success).toBe(false)
+    expect(clientMessageSchema.safeParse({ type: 'switch', id: '1', key: '../etc', seed: seedFor(null) }).success).toBe(false)
+    expect(scenarioKey({ templateId: null })).toBe('custom')
+    // An imported board's odd template id never becomes an unusable key.
+    expect(scenarioKey({ templateId: 'My_Template' })).toBe('custom')
+    expect(scenarioKey({ templateId: 'x'.repeat(70) })).toBe('custom')
+    expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', patch: {} }).success).toBe(false)
+    expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', patch: {}, on: 'waterfront-estate' }).success).toBe(true)
+  })
+
   it('validates the hello, patch, and ping shapes, and has no client replace', () => {
     expect(clientMessageSchema.safeParse({ type: 'replace', id: '1', board: {} }).success).toBe(false)
     expect(clientMessageSchema.safeParse({ type: 'ping' }).success).toBe(true)
-    expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', patch: { removes: ['a'] } }).success).toBe(true)
-    expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', patch: { upserts: [{ id: 'x', type: 'bogus' }] } }).success).toBe(false)
+    expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', on: 'custom', patch: { removes: ['a'] } }).success).toBe(true)
+    expect(clientMessageSchema.safeParse({ type: 'patch', id: '1', on: 'custom', patch: { upserts: [{ id: 'x', type: 'bogus' }] } }).success).toBe(false)
     expect(clientMessageSchema.safeParse({ type: 'hello', clientId: 'c', seed: { nope: true } }).success).toBe(false)
   })
 })

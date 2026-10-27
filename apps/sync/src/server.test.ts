@@ -10,16 +10,16 @@ import { SceneFiles, HISTORY_LIMIT } from './files.js'
 
 const note = (id: string, x = 0): SceneObject => ({ id, type: 'note', x, y: 0, rotation: 0, text: id, locked: false })
 
-function seed(objects: SceneObject[] = []): Board {
+function seed(objects: SceneObject[] = [], templateId: string | null = null, title = 'Drill'): Board {
   return boardSchema.parse({
     schemaVersion: 3,
     id: 'seed-board',
     name: 'Drill',
-    templateId: null,
+    templateId,
     createdAt: '2026-10-26T00:00:00.000Z',
     updatedAt: '2026-10-26T00:00:00.000Z',
     scenario: {
-      title: 'Drill', description: '', dispatch: '', background: { kind: 'builtin', url: '/map.webp' }, world: { width: 1000, height: 800 },
+      title, description: '', dispatch: '', background: { kind: 'builtin', url: '/map.webp' }, world: { width: 1000, height: 800 },
       northDegrees: 0, weather: { windFromDegrees: 0, windMph: 0, temperatureF: 80, conditions: '' }, injects: [], benchmarks: [],
     },
     objects,
@@ -103,7 +103,7 @@ describe('live rooms', () => {
   it('relays a patch to everyone else, acks the sender, and saves it', async () => {
     const { client: one } = await join('main', 'one')
     const { client: two } = await join('main', 'two')
-    one.send({ type: 'patch', id: 'p1', patch: { upserts: [note('e1', 40)] } })
+    one.send({ type: 'patch', id: 'p1', on: 'custom', patch: { upserts: [note('e1', 40)] } })
     const relayed = await two.next('patch')
     expect(relayed.from).toBe('one')
     expect(relayed.patch.upserts?.[0]).toMatchObject({ id: 'e1', x: 40 })
@@ -122,7 +122,7 @@ describe('live rooms', () => {
     base = `http://127.0.0.1:${(sync.server.address() as AddressInfo).port}`
     const { client } = await join('main', 'one')
     for (let step = 0; step < 8; step += 1) {
-      client.send({ type: 'patch', id: `p${step}`, patch: { upserts: [note('dragged', step)] } })
+      client.send({ type: 'patch', id: `p${step}`, on: 'custom', patch: { upserts: [note('dragged', step)] } })
       await new Promise((resolve) => setTimeout(resolve, 100))
     }
     const saved = JSON.parse(await readFile(path.join(dataDir, 'scenes', 'main', 'current.json'), 'utf8')) as { board: Board }
@@ -132,7 +132,7 @@ describe('live rooms', () => {
   it('keeps separate scenes apart', async () => {
     const { client: main } = await join('main', 'one')
     const { client: other } = await join('abcd2345', 'two')
-    other.send({ type: 'patch', id: 'p', patch: { upserts: [note('only-here')] } })
+    other.send({ type: 'patch', id: 'p', on: 'custom', patch: { upserts: [note('only-here')] } })
     await other.next('ack')
     expect(main.messages.some((message) => message.type === 'patch')).toBe(false)
     const response = await fetch(`${base}/sync-api/scenes/abcd2345/peers`)
@@ -141,7 +141,7 @@ describe('live rooms', () => {
 
   it('rejects malformed changes without dropping the connection', async () => {
     const { client } = await join('main', 'one')
-    client.send({ type: 'patch', id: 'bad', patch: { upserts: [{ id: 'x', type: 'tank' }] } })
+    client.send({ type: 'patch', id: 'bad', on: 'custom', patch: { upserts: [{ id: 'x', type: 'tank' }] } })
     expect((await client.next('error')).message).toMatch(/could not be read/)
     client.ws.send('not json')
     await client.next('error')
@@ -153,7 +153,7 @@ describe('live rooms', () => {
     const early = new Client(`ws://127.0.0.1:${new URL(base).port}/sync/main`)
     clients.push(early)
     await early.opened()
-    early.send({ type: 'patch', id: 'x', patch: { removes: ['a'] } })
+    early.send({ type: 'patch', id: 'x', on: 'custom', patch: { removes: ['a'] } })
     expect((await early.next('error')).message).toMatch(/Not connected/)
     await join('main', 'a')
     await join('main', 'b')
@@ -167,7 +167,7 @@ describe('live rooms', () => {
 
   it('snapshots when the last person leaves and before a restore, and restores a version for everyone', async () => {
     const { client: one } = await join('main', 'one', seed([note('original')]))
-    one.send({ type: 'patch', id: 'p1', patch: { upserts: [note('added')] } })
+    one.send({ type: 'patch', id: 'p1', on: 'custom', patch: { upserts: [note('added')] } })
     await one.next('ack')
     one.close()
     await new Promise((resolve) => setTimeout(resolve, 150))
@@ -175,7 +175,7 @@ describe('live rooms', () => {
     expect(history.items[0]).toMatchObject({ reason: 'Last person left', objectCount: 2 })
 
     const { client: two } = await join('main', 'two')
-    two.send({ type: 'patch', id: 'p2', patch: { removes: ['original', 'added'] } })
+    two.send({ type: 'patch', id: 'p2', on: 'custom', patch: { removes: ['original', 'added'] } })
     await two.next('ack')
     const restored = await fetch(`${base}/sync-api/scenes/main/history/${history.items[0]!.name}/restore`, { method: 'POST' })
     expect(restored.status).toBe(200)
@@ -200,9 +200,9 @@ describe('live rooms', () => {
   it('refuses a change that would push a scene past the object limit, naming the change', async () => {
     const { client } = await join('main', 'one')
     const many = (prefix: string) => Array.from({ length: 2600 }, (_, index) => note(`${prefix}${index}`))
-    client.send({ type: 'patch', id: 'first', patch: { upserts: many('a') } })
+    client.send({ type: 'patch', id: 'first', on: 'custom', patch: { upserts: many('a') } })
     await client.next('ack', (message) => message.id === 'first')
-    client.send({ type: 'patch', id: 'second', patch: { upserts: many('b') } })
+    client.send({ type: 'patch', id: 'second', on: 'custom', patch: { upserts: many('b') } })
     const error = await client.next('error')
     expect(error.id).toBe('second')
     expect(error.message).toMatch(/up to 5000 objects/)
@@ -222,7 +222,7 @@ describe('live rooms', () => {
   })
   it('reloads a saved scene after the server restarts', async () => {
     const { client } = await join('main', 'one')
-    client.send({ type: 'patch', id: 'p', patch: { upserts: [note('kept')] } })
+    client.send({ type: 'patch', id: 'p', on: 'custom', patch: { upserts: [note('kept')] } })
     await client.next('ack')
     client.close()
     await sync.close()
@@ -234,6 +234,104 @@ describe('live rooms', () => {
   })
 })
 
+describe('switching scenarios', () => {
+  it('switches everyone, keeps the old scenario, and brings it back exactly on switching back', async () => {
+    const { client: one } = await join('main', 'one', seed([note('waterfront-e1')], 'waterfront-estate', 'Waterfront'))
+    const { client: two } = await join('main', 'two')
+
+    one.send({ type: 'switch', id: 's1', key: 'oceanfront-condo', seed: seed([], 'oceanfront-condo', 'Oceanfront') })
+    const toOcean = await two.next('replace')
+    expect(toOcean).toMatchObject({ reason: 'switch', from: 'one' })
+    expect(toOcean.board.scenario.title).toBe('Oceanfront')
+    expect((await one.next('replace')).board.templateId).toBe('oceanfront-condo')
+    await one.next('ack', (message) => message.id === 's1')
+
+    two.send({ type: 'patch', id: 'p1', patch: { upserts: [note('ocean-flames')] }, on: 'oceanfront-condo' })
+    await two.next('ack', (message) => message.id === 'p1')
+
+    await new Promise((resolve) => setTimeout(resolve, 2100))
+    two.send({ type: 'switch', id: 's2', key: 'waterfront-estate', seed: seed([], 'waterfront-estate', 'Waterfront') })
+    const back = await one.next('replace', (message) => message.board.templateId === 'waterfront-estate')
+    expect(back.board.objects.map((object) => object.id)).toEqual(['waterfront-e1'])
+
+    await new Promise((resolve) => setTimeout(resolve, 2100))
+    one.send({ type: 'switch', id: 's3', key: 'oceanfront-condo', seed: seed([], 'oceanfront-condo', 'Oceanfront') })
+    const again = await two.next('replace', (message) => message.board.templateId === 'oceanfront-condo')
+    expect(again.board.objects.map((object) => object.id)).toEqual(['ocean-flames'])
+
+    const history = await (await fetch(`${base}/sync-api/scenes/main/history`)).json() as { items: Array<{ reason: string; title: string }> }
+    // The Oceanfront had been edited, so leaving it snapshotted it, labelled with its own title.
+    expect(history.items.find((item) => item.reason === 'Before switching to Waterfront')?.title).toBe('Oceanfront')
+  })
+
+  it('drops a change made on the scenario the scene just left', async () => {
+    const { client } = await join('main', 'one', seed([], 'waterfront-estate'))
+    client.send({ type: 'switch', id: 's', key: 'oceanfront-condo', seed: seed([], 'oceanfront-condo') })
+    await client.next('replace')
+    client.send({ type: 'patch', id: 'late', patch: { upserts: [note('stale-move')] }, on: 'waterfront-estate' })
+    await client.next('ack', (message) => message.id === 'late')
+    expect(sync.rooms.get('main')?.current.board.objects).toEqual([])
+  })
+
+  it('paces switches and refuses a starting board that does not match the scenario', async () => {
+    const { client } = await join('main', 'one', seed([], 'waterfront-estate'))
+    client.send({ type: 'switch', id: 'bad', key: 'oceanfront-condo', seed: seed([], 'waterfront-estate') })
+    expect((await client.next('error')).message).toMatch(/could not be read/)
+    client.send({ type: 'switch', id: 's1', key: 'oceanfront-condo', seed: seed([], 'oceanfront-condo') })
+    await client.next('replace')
+    client.send({ type: 'switch', id: 's2', key: 'waterfront-estate', seed: seed([], 'waterfront-estate') })
+    expect((await client.next('error')).message).toMatch(/just switched/)
+  })
+})
+describe('review fixes for switching', () => {
+  it('tells a tab running the previous release to reload', async () => {
+    const { client } = await join('main', 'one')
+    client.send({ type: 'patch', id: 'old', patch: { removes: ['a'] } })
+    expect((await client.next('error')).message).toMatch(/out of date/)
+  })
+
+  it('restoring a saved version from another scenario parks the current scenario instead of losing it', async () => {
+    const { client } = await join('main', 'one', seed([], 'waterfront-estate', 'Waterfront'))
+    client.send({ type: 'patch', id: 'w', on: 'waterfront-estate', patch: { upserts: [note('waterfront-work')] } })
+    await client.next('ack')
+    client.close()
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const history = await (await fetch(`${base}/sync-api/scenes/main/history`)).json() as { items: Array<{ name: string }> }
+    const { client: two } = await join('main', 'two')
+    two.send({ type: 'switch', id: 's', key: 'oceanfront-condo', seed: seed([note('ocean-work')], 'oceanfront-condo', 'Oceanfront') })
+    await two.next('replace')
+    // Restore the Waterfront version while the scene is on the Oceanfront.
+    expect((await fetch(`${base}/sync-api/scenes/main/history/${history.items[0]!.name}/restore`, { method: 'POST' })).status).toBe(200)
+    expect((await two.next('replace', (message) => message.board.templateId === 'waterfront-estate')).board.objects.map((object) => object.id)).toEqual(['waterfront-work'])
+    await new Promise((resolve) => setTimeout(resolve, 2100))
+    two.send({ type: 'switch', id: 's2', key: 'oceanfront-condo', seed: seed([], 'oceanfront-condo', 'Oceanfront') })
+    expect((await two.next('replace', (message) => message.board.templateId === 'oceanfront-condo')).board.objects.map((object) => object.id)).toEqual(['ocean-work'])
+  })
+
+  it('runs a switch and a restore one after the other, never interleaved', async () => {
+    await join('main', 'one', seed([note('w')], 'waterfront-estate', 'Waterfront'))
+    const room = sync.rooms.get('main')!
+    const restoreTo = seed([note('restored')], 'waterfront-estate', 'Waterfront')
+    await Promise.all([
+      room.switchScenario('a', 'oceanfront-condo', seed([note('o')], 'oceanfront-condo', 'Oceanfront')),
+      room.replace('b', restoreTo, 'Restore'),
+    ])
+    expect(room.current.board.objects.map((object) => object.id)).toEqual(['restored'])
+    // The Oceanfront board was parked under its own name, not under the restored scenario's.
+    const files = new SceneFiles(dataDir)
+    expect((await files.loadParked('main', 'oceanfront-condo'))?.objects.map((object) => object.id)).toEqual(['o'])
+    expect((await files.loadParked('main', 'waterfront-estate'))?.objects.map((object) => object.id)).toEqual(['w'])
+  })
+
+  it('sets a damaged parked scenario aside and starts that scenario fresh', async () => {
+    const files = new SceneFiles(dataDir)
+    await files.park('abcd', 'oceanfront-condo', seed([], 'oceanfront-condo'))
+    await writeFile(path.join(dataDir, 'scenes', 'abcd', 'parked', 'oceanfront-condo.json'), '{ broken')
+    expect(await files.loadParked('abcd', 'oceanfront-condo')).toBeUndefined()
+    const names = await readdir(path.join(dataDir, 'scenes', 'abcd', 'parked'))
+    expect(names.some((name) => name.startsWith('oceanfront-condo.json.damaged-'))).toBe(true)
+  })
+})
 describe('http routes', () => {
   it('reports health and 404s unknown paths and bad scene ids', async () => {
     expect(await (await fetch(`${base}/sync-api/health`)).json()).toMatchObject({ status: 'ok' })

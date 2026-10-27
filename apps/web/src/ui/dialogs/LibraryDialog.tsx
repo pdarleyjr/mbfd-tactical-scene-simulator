@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FileImage, FolderOpen, History, ImagePlus, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { MAIN_SCENE_ID } from '@mbfd/domain'
 import { useUi } from '../../store/ui'
-import { deleteDeviceBoard, exportCurrentBoard, exportImage, importSceneFile, listDeviceBoards, listServerSnapshots, newScenarioFromImage, openAsSeparateScene, openDeviceBoard, restoreServerSnapshot, type ServerSnapshot } from '../../lib/workspace'
+import { deleteDeviceBoard, exportCurrentBoard, exportImage, importSceneFile, listDeviceBoards, listServerSnapshots, newScenarioFromImage, openAsSeparateScene, openDeviceBoard, restoreServerSnapshot, switchScenario, type ServerSnapshot } from '../../lib/workspace'
+import { templates } from '../../templates'
+import { useBoard } from '../../store/board'
 import { goToScene, scenePath, useLive } from '../../lib/live'
 import { recentScenes } from '../../lib/recent'
 import type { BoardSummary } from '../../lib/storage'
@@ -13,6 +15,7 @@ import { Button, IconButton, Modal } from '../primitives'
 export function LibraryDialog() {
   const close = useUi((state) => state.closeDialog)
   const sceneId = useLive((state) => state.sceneId)
+  const currentTemplateId = useBoard((state) => state.board.templateId)
   const [snapshots, setSnapshots] = useState<ServerSnapshot[] | null>(null)
   const [snapshotError, setSnapshotError] = useState('')
   const [deviceBoards, setDeviceBoards] = useState<BoardSummary[]>([])
@@ -44,6 +47,26 @@ export function LibraryDialog() {
       size="lg"
       testId="library-dialog"
     >
+      <h3 className="library__heading">Scenario</h3>
+      <p className="fine-print">Everyone in this scene switches with you. Work on each scenario is kept, so switching back picks up where it left off.</p>
+      <ul className="scenario-picker" data-testid="scenario-picker">
+        {templates.map((template) => {
+          const current = template.id === currentTemplateId
+          return (
+            <li key={template.id} className={`scenario-card ${current ? 'is-current' : ''}`} data-scenario={template.id}>
+              <img className="scenario-card__thumb" src={template.thumbnailUrl} alt="" width={160} height={104} />
+              <div className="scenario-card__meta">
+                <strong>{template.scenario.title}</strong>
+                <span>{current ? 'Showing now for everyone in this scene' : template.scenario.video ? 'With initial-conditions video' : 'Map only'}</span>
+              </div>
+              {current
+                ? <span className="scenario-card__badge">Current</span>
+                : <Button tone="primary" onClick={() => { switchScenario(template.id); close() }} data-testid={`switch-to-${template.id}`}>Switch everyone</Button>}
+            </li>
+          )
+        })}
+      </ul>
+
       <div className="library__actions">
         <Button tone="primary" icon={<Plus size={18} />} onClick={() => void run(() => openAsSeparateScene(), true)} data-testid="new-separate-scene">Start a separate scene</Button>
         <Button icon={<ImagePlus size={18} />} onClick={() => setCreating((value) => !value)} aria-expanded={creating}>New scenario from an image</Button>
@@ -62,7 +85,7 @@ export function LibraryDialog() {
           <li key={snapshot.name} className="board-card board-card--compact">
             <div className="board-card__meta">
               <strong>{new Date(snapshot.savedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</strong>
-              <span>{snapshot.reason} · {snapshot.objectCount} objects · {formatRelative(snapshot.savedAt)}</span>
+              <span>{snapshot.title ? `${snapshot.title} · ` : ''}{snapshot.reason} · {snapshot.objectCount} objects · {formatRelative(snapshot.savedAt)}</span>
             </div>
             <div className="board-card__actions">
               <Button icon={<RotateCcw size={16} />} onClick={() => void run(() => restoreServerSnapshot(sceneId, snapshot.name), true)}>Restore</Button>

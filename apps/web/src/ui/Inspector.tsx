@@ -17,7 +17,7 @@ import {
   type NozzleObject,
   type SceneObject,
 } from '@mbfd/domain'
-import { apparatusModelFor, apparatusSize, describeHose, objectName, polylineLength, portsFor, readHose, readLength, type WaterSupplyReport } from '@mbfd/fire-model'
+import { apparatusModelFor, apparatusSize, defaultMarkerRadius, describeHose, objectName, polylineLength, portsFor, readHose, readLength, type WaterSupplyReport } from '@mbfd/fire-model'
 import { sceneContext, useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { useWaterSupply } from '../store/selectors'
@@ -360,14 +360,15 @@ function MarkerInspector({ object }: { object: MarkerObject }) {
           <select id={id} className="input" value={object.markerType} onChange={(event) => {
             const next = markerCatalog.find((marker) => marker.id === event.target.value)
             if (!next) return
-            updateObject<MarkerObject>(object.id, { markerType: next.id, ...(next.area ? { radius: object.radius ?? 90 } : {}) }, 'Change marker')
+            const radius = next.area || next.effect ? object.radius ?? defaultMarkerRadius(next.id, feetPerUnit) : undefined
+            updateObject<MarkerObject>(object.id, { markerType: next.id, ...(radius ? { radius } : {}) }, 'Change marker')
           }}>
             {markerCatalog.map((marker) => <option key={marker.id} value={marker.id}>{marker.label}</option>)}
           </select>
         )}
       </Field>
       {object.radius !== undefined && (
-        <Field label={feetPerUnit ? 'Radius (ft)' : 'Radius (map units)'} hint={feetPerUnit ? undefined : 'Calibrate the map to set the zone in feet.'}>
+        <Field label={`${definition?.effect ? 'Size' : 'Radius'} ${feetPerUnit ? '(ft)' : '(map units)'}`} hint={feetPerUnit ? (definition?.effect ? 'Or drag the handle on its edge.' : undefined) : 'Calibrate the map to set this in feet.'}>
           {(id) => <input id={id} className="input input--number" type="number" min={1} value={Math.round(feetPerUnit ? object.radius! * feetPerUnit : object.radius!)} onChange={(event) => {
             const value = Number(event.target.value)
             if (value > 0) updateObject<MarkerObject>(object.id, { radius: Math.min(5000, feetPerUnit ? value / feetPerUnit : value) }, 'Resize zone')

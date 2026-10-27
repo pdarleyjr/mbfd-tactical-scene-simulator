@@ -1,12 +1,13 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { boardSchema, sceneIdSchema, type Board } from '@mbfd/domain'
+import { boardSchema, scenarioKeySchema, sceneIdSchema, type Board } from '@mbfd/domain'
 
 /**
  * Scene persistence on disk, one folder per scene:
  *   scenes/<id>/current.json        the live board and its version
  *   scenes/<id>/history/<stamp>.json automatic snapshots, newest kept
+ *   scenes/<id>/parked/<scenario>.json scenarios switched away from, waiting to come back
  * Writes go to a temporary file first and are renamed into place, so a crash
  * can never leave a half-written scene. Writes to one scene run one at a time.
  */
@@ -24,6 +25,8 @@ export interface HistoryEntry {
   version: number
   reason: string
   objectCount: number
+  /** Scenario title, so saved versions of different scenarios can be told apart. */
+  title: string
 }
 
 function parseScene(text: string): StoredScene | undefined {
@@ -120,8 +123,8 @@ export class SceneFiles {
     const entries: HistoryEntry[] = []
     for (const file of files) {
       try {
-        const raw = JSON.parse(await readFile(path.join(folder, file), 'utf8')) as { savedAt?: string; version?: number; reason?: string; board?: { objects?: unknown[] } }
-        entries.push({ name: file.replace(/\.json$/, ''), savedAt: raw.savedAt ?? '', version: raw.version ?? 0, reason: raw.reason ?? '', objectCount: raw.board?.objects?.length ?? 0 })
+        const raw = JSON.parse(await readFile(path.join(folder, file), 'utf8')) as { savedAt?: string; version?: number; reason?: string; board?: { objects?: unknown[]; scenario?: { title?: string } } }
+        entries.push({ name: file.replace(/\.json$/, ''), savedAt: raw.savedAt ?? '', version: raw.version ?? 0, reason: raw.reason ?? '', objectCount: raw.board?.objects?.length ?? 0, title: raw.board?.scenario?.title ?? '' })
       } catch { /* skip unreadable snapshot */ }
     }
     return entries
@@ -138,6 +141,32 @@ export class SceneFiles {
     }
   }
 
+  /** Keeps a scenario's board while the scene shows a different one. */
+  park(id: string, key: string, board: Board) {
+    const folder = path.join(this.folder(id), 'parked')
+    const file = path.join(folder, `${scenarioKeySchema.parse(key)}.json`)
+    return this.queue(id, async () => {
+      await mkdir(folder, { recursive: true })
+      await writeAtomic(file, JSON.stringify({ board }))
+    })
+  }
+
+  /** A parked scenario, read in turn with writes so a park still being written is never missed. */
+  loadParked(id: string, key: string): Promise<Board | undefined> {
+    const file = path.join(this.folder(id), 'parked', `${scenarioKeySchema.parse(key)}.json`)
+    return this.queue(id, async () => {
+      let text: string
+      try { text = await readFile(file, 'utf8') } catch { return undefined }
+      try {
+        const board = boardSchema.safeParse((JSON.parse(text) as { board?: unknown }).board)
+        if (board.success) return board.data
+      } catch { /* damaged: set aside below */ }
+      const aside = `${file}.damaged-${Date.now()}`
+      await rename(file, aside)
+      console.error(`Parked scenario ${key} in scene ${id} could not be read; kept it as ${path.basename(aside)}`)
+      return undefined
+    })
+  }
   async sceneCount(): Promise<number> {
     try { return (await readdir(path.join(this.root, 'scenes'))).length } catch { return 0 }
   }

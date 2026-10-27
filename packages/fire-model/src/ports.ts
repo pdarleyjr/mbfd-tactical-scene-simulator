@@ -18,7 +18,7 @@ export interface ApparatusSize {
 }
 
 /** Drawing scale for maps that have not been calibrated yet. */
-const UNCALIBRATED_UNITS_PER_FT = 2.25
+export const UNCALIBRATED_UNITS_PER_FT = 2.25
 
 export function apparatusModelFor(templateId: string, modelId?: string): ApparatusModel {
   const template = findApparatusTemplate(templateId)

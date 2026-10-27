@@ -4,6 +4,7 @@ import {
   createApparatus,
   createHydrant,
   createMarker,
+  defaultMarkerRadius,
   createNote,
   createNozzle,
   createWye,
@@ -67,6 +68,12 @@ describe('object factories', () => {
   it('gives area markers a radius and point markers none', () => {
     expect(createMarker('collapse-zone', { x: 0, y: 0 }).radius).toBe(90)
     expect(createMarker('victim', { x: 0, y: 0 })).not.toHaveProperty('radius')
+    // Flames and smoke start at a real size: 12 ft and 18 ft radius.
+    expect(createMarker('flames', { x: 0, y: 0 }, 0.5).radius).toBe(24)
+    expect(createMarker('smoke', { x: 0, y: 0 }, 0.5).radius).toBe(36)
+    expect(createMarker('flames', { x: 0, y: 0 }).radius).toBeCloseTo(27, 6)
+    expect(defaultMarkerRadius('collapse-zone', 0.5)).toBe(90)
+    expect(defaultMarkerRadius('victim')).toBeUndefined()
   })
 
   it('applies defaults for notes and nozzles', () => {

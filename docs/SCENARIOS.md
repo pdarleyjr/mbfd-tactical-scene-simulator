@@ -12,10 +12,10 @@ Boards are working copies. Use **Duplicate** in the library to branch a variatio
 
 ## As a built-in template (code)
 
-Built-in templates ship with the app and cannot be overwritten from the UI.
+Built-in templates ship with the app and cannot be overwritten from the UI. Current templates: `waterfront-estate` (default, with video) and `oceanfront-condo` (map only). Every template appears in the **Scenario** list in Scenes, where **Switch everyone** moves the whole scene to it; the scenario switched away from is kept on the server (`scenes/<id>/parked/<template>.json`) and restored on switching back.
 
 1. Put original masters in `data/assets/source/` and optimized runtime files in `apps/web/public/scenario-assets/<scenario>/` (see `tools/process-seed-assets.ps1`; record hashes in a manifest).
-2. Add a file beside `apps/web/src/templates/waterfront-estate.ts` exporting a `ScenarioTemplate` with a unique `id`, the `scenario` settings, and any starting `objects`.
+2. Add a file beside `apps/web/src/templates/waterfront-estate.ts` exporting a `ScenarioTemplate` with a unique `id`, a `thumbnailUrl` for the picker, the `scenario` settings (leave out `video` and `poster` when there is none), and any starting `objects`.
 3. Register it in `apps/web/src/templates/index.ts`.
 4. Easiest path: build the scenario in the UI, download the scene file, and copy its `board.scenario` and `board.objects` into the template.
 

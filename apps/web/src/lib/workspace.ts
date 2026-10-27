@@ -6,7 +6,7 @@ import { canvasApi } from '../canvas/api'
 import { buildExportFile, downloadBlob, downloadText, exportFileName, parseSceneFile } from './scene-files'
 import { getStorage } from './session'
 import { offerUndo } from './undo'
-import { createSceneId, flushLive, goToScene, isDisplayView, onLiveBoardChange, sceneIdFromPath, startLive, useLive } from './live'
+import { createSceneId, flushLive, goToScene, sendScenarioSwitch, isDisplayView, onLiveBoardChange, sceneIdFromPath, startLive, useLive } from './live'
 import { shareBoardMedia, uploadMedia } from './media'
 import { rememberScene } from './recent'
 
@@ -62,6 +62,16 @@ export async function openAsSeparateScene(board?: Board) {
     await storage.setMeta(seedKey(id), shared.board)
   }
   goToScene(id)
+}
+
+/**
+ * Switches everyone in this scene to another scenario. Work on the current one
+ * is kept on the server and comes back when anyone switches back.
+ */
+export function switchScenario(templateId: string) {
+  const template = findTemplate(templateId)
+  if (!template || useBoard.getState().board.templateId === template.id) return
+  if (!sendScenarioSwitch(boardFromTemplate(template))) useUi.getState().toast('Not connected right now. Try again once the top bar shows Live.', 'warning')
 }
 
 /** Restores the original scenario objects. Undoable, and snapshots first. */
@@ -197,6 +207,7 @@ export interface ServerSnapshot {
   version: number
   reason: string
   objectCount: number
+  title?: string
 }
 
 /** Automatic snapshots the server keeps for this scene, newest first. */

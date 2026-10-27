@@ -14,6 +14,13 @@ export const sceneIdSchema = z.string().regex(/^[a-z0-9]{4,24}$/, 'Scene ids are
 
 const idList = z.array(z.string().min(1).max(128)).max(5000)
 
+/** Which scenario a board is: its template, or 'custom' for a board built on an uploaded map. */
+export const scenarioKeySchema = z.string().regex(/^[a-z0-9-]{1,64}$/)
+export function scenarioKey(board: Pick<Board, 'templateId'>): string {
+  const id = board.templateId
+  return id && scenarioKeySchema.safeParse(id).success ? id : 'custom'
+}
+
 export const scenePatchSchema = z.object({
   upserts: z.array(sceneObjectSchema).max(5000).optional(),
   removes: idList.optional(),
@@ -30,7 +37,11 @@ export type ScenePatch = z.infer<typeof scenePatchSchema>
 
 export const clientMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('hello'), clientId: z.string().min(1).max(64), seed: boardSchema }),
-  z.object({ type: z.literal('patch'), id: z.string().min(1).max(64), patch: scenePatchSchema }),
+  // on names the scenario the change was made on; a change that arrives after a switch is dropped.
+  z.object({ type: z.literal('patch'), id: z.string().min(1).max(64), patch: scenePatchSchema, on: scenarioKeySchema }),
+  // Switches everyone in the scene to another scenario. The current one is kept and comes back on switching back.
+  z.object({ type: z.literal('switch'), id: z.string().min(1).max(64), key: scenarioKeySchema, seed: boardSchema })
+    .refine((message) => scenarioKey(message.seed) === message.key, { message: 'The starting board does not match the scenario.' }),
   z.object({ type: z.literal('ping') }),
 ])
 
@@ -39,7 +50,7 @@ export type ClientMessage = z.infer<typeof clientMessageSchema>
 export type ServerMessage =
   | { type: 'state'; board: Board; version: number; now: number; peers: number }
   | { type: 'patch'; from: string; version: number; patch: ScenePatch }
-  | { type: 'replace'; from: string; version: number; board: Board }
+  | { type: 'replace'; from: string; version: number; board: Board; reason?: 'restore' | 'switch' | undefined }
   | { type: 'ack'; id: string; version: number }
   | { type: 'presence'; peers: number }
   | { type: 'error'; message: string; id?: string | undefined }
