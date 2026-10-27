@@ -18,7 +18,7 @@ function prefersReducedMotion() {
  * them. Only this layer redraws for the animation, and only while at least one
  * effect is on the map; with reduced motion they are drawn once, still.
  */
-export function EffectsLayer({ effects, downwindDeg }: { effects: readonly MarkerObject[]; downwindDeg: number }) {
+export function EffectsLayer({ effects }: { effects: readonly MarkerObject[] }) {
   const layerRef = useRef<Konva.Layer>(null)
   const animate = effects.length > 0 && !prefersReducedMotion()
   const frame = frameMs(effects.length)
@@ -41,19 +41,20 @@ export function EffectsLayer({ effects, downwindDeg }: { effects: readonly Marke
     <Layer ref={layerRef} listening={false}>
       {effects.map((effect) => {
         const radius = effect.radius ?? 20
+        const stretch = effect.stretch ?? 1
         const seed = effectSeed(effect.id)
         return (
           <Shape
             key={effect.id}
             x={effect.x}
             y={effect.y}
+            rotation={effect.rotation}
             name="effect"
             perfectDrawEnabled={false}
-            sceneFunc={(context, shape) => {
+            sceneFunc={(context) => {
               const ctx = context._context
-              if (effect.markerType === 'smoke') drawSmoke(ctx, radius, clock, seed, downwindDeg)
-              // Canvas blur is in screen pixels, so it follows the zoom.
-              else drawFlame(ctx, radius, clock, seed, radius * 0.18 * shape.getAbsoluteScale().x)
+              if (effect.markerType === 'smoke') drawSmoke(ctx, radius, clock, seed, 0, stretch)
+              else drawFlame(ctx, radius, clock, seed, stretch)
             }}
           />
         )

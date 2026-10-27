@@ -32,7 +32,7 @@ import { ArrowNode, HydrantNode, MarkerNode, MeasurementNode, NoteNode, NozzleNo
 import { PathHandles, RadiusHandle } from './overlays/EditHandles'
 import { DraftOverlay } from './overlays/DraftOverlay'
 import { EffectsLayer } from './nodes/EffectsLayer'
-import { downwindDegrees } from './effects'
+import { effectBounds } from './effects'
 
 Konva.dragDistance = 5
 Konva.hitOnDragEnabled = false
@@ -47,6 +47,13 @@ type Gesture =
   | { kind: 'idle' }
 
 const ROTATABLE = new Set(['apparatus', 'appliance', 'nozzle'])
+/** Top handle stretches the height, the corner resizes; the round handle rotates. */
+const EFFECT_ANCHORS = ['top-center', 'bottom-right']
+
+/** Flames and smoke plumes rotate and stretch with the transform frame. */
+function isEffect(object: SceneObject | undefined): object is MarkerObject {
+  return object?.type === 'marker' && Boolean(findMarker(object.markerType)?.effect)
+}
 const rotationSnaps = Array.from({ length: 24 }, (_value, index) => index * 15)
 
 function chromePadding(width: number) {
@@ -280,7 +287,7 @@ export function SceneStage() {
   }, [interactive])
 
   // Keep the rotate handle attached to the selected vehicles and appliances.
-  const rotatableIds = useMemo(() => objects.filter((object) => selected.has(object.id) && ROTATABLE.has(object.type) && !object.locked).map((object) => object.id), [objects, selected])
+  const rotatableIds = useMemo(() => objects.filter((object) => selected.has(object.id) && (ROTATABLE.has(object.type) || isEffect(object)) && !object.locked).map((object) => object.id), [objects, selected])
   useEffect(() => {
     const transformer = transformerRef.current
     const stage = stageRef.current
@@ -293,8 +300,24 @@ export function SceneStage() {
   function syncTransform() {
     const transformer = transformerRef.current
     if (!transformer) return
-    const updates = new Map(transformer.nodes().map((node) => [node.id(), { x: node.x(), y: node.y(), rotation: normalizeDegrees(node.rotation()) }]))
-    useBoard.getState().setTransient((current) => current.map((object) => {
+    const current = new Map(useBoard.getState().board.objects.map((object) => [object.id, object]))
+    const updates = new Map(transformer.nodes().map((node) => {
+      const update: Partial<MarkerObject> = { x: node.x(), y: node.y(), rotation: normalizeDegrees(node.rotation()) }
+      const object = current.get(node.id())
+      if (isEffect(object) && (node.scaleX() !== 1 || node.scaleY() !== 1)) {
+        // Size and height go into the effect itself; the frame stays unscaled.
+        const sx = Math.abs(node.scaleX())
+        const sy = Math.abs(node.scaleY())
+        const radius = Math.min(5000, Math.max(4, (object.radius ?? 20) * sx))
+        const stretch = Math.min(4, Math.max(0.3, (object.stretch ?? 1) * (sy / sx)))
+        Object.assign(update, { radius, stretch })
+        node.scale({ x: 1, y: 1 })
+        const definition = findMarker(object.markerType)
+        if (node instanceof Konva.Group) node.findOne('Rect')?.setAttrs(effectBounds(definition?.effect ?? 'flame', radius, stretch))
+      }
+      return [node.id(), update] as const
+    }))
+    useBoard.getState().setTransient((objects) => objects.map((object) => {
       const update = updates.get(object.id)
       return update && 'rotation' in object ? { ...object, ...update } as SceneObject : object
     }))
@@ -495,6 +518,7 @@ export function SceneStage() {
   }, [])
 
   const selectedSingle = selection.length === 1 ? objects.find((object) => object.id === selection[0]) : undefined
+  const effectFrame = isEffect(selectedSingle) && !selectedSingle.locked && rotatableIds.length === 1
   const cursorStyle = spaceDown ? 'grab' : reviewing ? 'grab' : tool === 'select' ? 'default' : tool === 'apparatus' || tool === 'hydrant' || tool === 'marker' || tool === 'note' ? 'copy' : 'crosshair'
   const strokePoints = strokePreview.current
 
@@ -534,7 +558,7 @@ export function SceneStage() {
             {background && <Image image={background} width={world.width} height={world.height} />}
             {!background && <Rect width={world.width} height={world.height} fill={backgroundFailed ? '#2a1a18' : '#1a242a'} />}
           </Layer>
-          {layers.markers && effects.length > 0 && <EffectsLayer effects={effects} downwindDeg={downwindDegrees(scenario.conditions)} />}
+          {layers.markers && effects.length > 0 && <EffectsLayer effects={effects} />}
           <InteractionContext.Provider value={interaction}>
             <Layer listening={interactive}>
               {apparatus.map((object) => object.type === 'apparatus' && (
@@ -586,16 +610,18 @@ export function SceneStage() {
           <Layer ref={overlayRef}>
             {compareObjects && <CompareGhost objects={compareObjects} inv={roundedInv} context={context} />}
             {interactive && selectedSingle && isPathObject(selectedSingle) && <PathHandles object={selectedSingle} inv={roundedInv} />}
-            {interactive && selectedSingle?.type === 'marker' && <RadiusHandle object={selectedSingle} inv={roundedInv} />}
+            {interactive && selectedSingle?.type === 'marker' && !isEffect(selectedSingle) && <RadiusHandle object={selectedSingle} inv={roundedInv} />}
             <Transformer
               ref={transformerRef}
-              resizeEnabled={false}
-              enabledAnchors={[]}
+              resizeEnabled={effectFrame}
+              enabledAnchors={effectFrame ? EFFECT_ANCHORS : []}
+              keepRatio
+              boundBoxFunc={(previous, next) => (effectFrame && (Math.abs(next.width) < 12 || Math.abs(next.height) < 12) ? previous : next)}
               rotateEnabled
               rotationSnaps={shiftDown ? [] : rotationSnaps}
               rotationSnapTolerance={6}
-              rotateAnchorOffset={26}
-              anchorSize={22}
+              rotateAnchorOffset={effectFrame ? 54 : 26}
+              anchorSize={effectFrame ? 18 : 22}
               anchorCornerRadius={11}
               anchorFill="#f3f1ea"
               anchorStroke={ink.select}
@@ -603,14 +629,14 @@ export function SceneStage() {
               borderStroke={ink.select}
               borderDash={[6, 4]}
               borderStrokeWidth={1.5}
-              padding={5}
+              padding={effectFrame ? 12 : 5}
               flipEnabled={false}
               ignoreStroke
               onTransformStart={() => useBoard.getState().beginTransient()}
               onTransform={syncTransform}
               onTransformEnd={() => {
                 syncTransform()
-                useBoard.getState().endTransient('Rotate')
+                useBoard.getState().endTransient(effectFrame ? 'Adjust effect' : 'Rotate')
                 const nodes = transformerRef.current?.nodes() ?? []
                 for (const node of nodes) {
                   const object = useBoard.getState().board.objects.find((candidate) => candidate.id === node.id())

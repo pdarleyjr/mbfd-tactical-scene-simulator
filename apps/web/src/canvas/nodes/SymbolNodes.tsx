@@ -3,6 +3,7 @@ import { Arrow, Circle, Group, Label, Line, Rect, Shape, Tag, Text } from 'react
 import { findMarker, type ApplianceObject, type ArrowObject, type HydrantObject, type MarkerObject, type MeasurementObject, type NoteObject, type NozzleObject } from '@mbfd/domain'
 import { labelAnchor, type LengthReading } from '@mbfd/fire-model'
 import { ink, useInteraction } from '../interaction'
+import { effectBounds } from '../effects'
 
 const hydrantStatusColor: Record<HydrantObject['status'], string> = {
   available: ink.ok,
@@ -97,12 +98,13 @@ export const MarkerNode = memo(function MarkerNode({ object, selected, inv, feet
   if (definition?.effect) {
     // The flame or smoke itself is drawn by the effects layer; this is what you tap and drag.
     const reach = radius ?? 20
+    const bounds = effectBounds(definition.effect, reach, object.stretch ?? 1)
     return (
-      <Group {...handlers} name="scene-object marker effect-target" x={object.x} y={object.y}>
-        <Circle radius={reach} fill="#000" opacity={0.001} />
-        {selected && <Circle radius={reach} stroke={ink.select} strokeWidth={2} dash={[8, 5]} strokeScaleEnabled={false} />}
+      <Group {...handlers} name="scene-object marker effect-target" x={object.x} y={object.y} rotation={object.rotation}>
+        {/* Selection shows as the rotate-and-stretch frame around this area. */}
+        <Rect {...bounds} fill="#000" opacity={0.001} />
         {object.label && (
-          <Label x={0} y={reach + 4 * inv} scaleX={s} scaleY={s} listening={false}>
+          <Label x={0} y={bounds.y + bounds.height + 4 * inv} rotation={-object.rotation} scaleX={s} scaleY={s} listening={false}>
             <Tag fill="rgba(11,16,19,0.86)" stroke={color} strokeWidth={1} cornerRadius={3} pointerDirection="up" pointerWidth={6} pointerHeight={4} />
             <Text text={object.label} fontFamily="Barlow" fontStyle="600" fontSize={12} padding={3} fill={ink.labelText} />
           </Label>
