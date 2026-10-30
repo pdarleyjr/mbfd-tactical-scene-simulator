@@ -1,14 +1,16 @@
 import { create } from 'zustand'
-import { applyScenePatch, diffBoards, isEmptyPatch, MAIN_SCENE_ID, newSceneId, scenarioKey, sceneIdSchema, withoutPendingChanges, type Board, type ClientMessage, type ScenePatch, type ServerMessage } from '@mbfd/domain'
+import { applyScenePatch, diffBoards, isEmptyPatch, MAIN_SCENE_ID, scenarioKey, withoutPendingChanges, type Board, type ClientMessage, type RoomAccess, type ScenePatch, type ServerMessage } from '@mbfd/domain'
 import { setClockOffset, useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { canvasApi } from '../canvas/api'
+import { hostKeyFor, updateHostedKind } from './rooms'
+import { scenePath } from './route'
 
 /**
- * Live shared scenes. Everyone who opens the same link works on one scene:
- * changes go to the sync service as small patches and arrive from others the
- * same way. While the connection is down, edits keep working locally and
- * merge back in when it returns.
+ * Live scenes. Everyone in a simulation works on one scene: changes go to the
+ * sync service as small patches and arrive from others the same way. A private
+ * simulation is simply a scene only its owner can open. While the connection
+ * is down, edits keep working locally and merge back in when it returns.
  */
 
 export type LiveConnection = 'connecting' | 'live' | 'reconnecting'
@@ -21,6 +23,12 @@ interface LiveStore {
   /** Others were already here when this browser arrived. */
   arrivedToCompany: boolean
   setArrivalNoticeSeen(): void
+  /** What the server lets this connection do. Unknown until the first state arrives. */
+  access: RoomAccess | null
+  /** The server turned this connection away for good (private, locked, ended, not found, full). */
+  denied: { code: string; message: string } | null
+  /** The invite is valid but the host has not opened the simulation yet. */
+  waitingForHost: boolean
 }
 
 export const useLive = create<LiveStore>()((set) => ({
@@ -29,6 +37,9 @@ export const useLive = create<LiveStore>()((set) => ({
   peers: 1,
   arrivedToCompany: false,
   setArrivalNoticeSeen() { set({ arrivedToCompany: false }) },
+  access: null,
+  denied: null,
+  waitingForHost: false,
 }))
 
 const SEND_DELAY_MS = 30
@@ -37,33 +48,12 @@ const MAX_RETRY_MS = 15_000
 const PING_EVERY_MS = 20_000
 const SILENCE_LIMIT_MS = 60_000
 
-/** The scene named by the address: `/` is the main scene, `/s/<id>` a separate one. */
-export function sceneIdFromPath(pathname: string): string {
-  const match = /^\/s\/([^/]+)\/?$/.exec(pathname)
-  const candidate = match?.[1]?.toLowerCase()
-  return candidate && sceneIdSchema.safeParse(candidate).success ? candidate : MAIN_SCENE_ID
-}
-
-export function isDisplayView(search: string): boolean {
-  return new URLSearchParams(search).get('view') === 'present'
-}
-
-export function scenePath(sceneId: string): string {
-  return sceneId === MAIN_SCENE_ID ? '/' : `/s/${sceneId}`
-}
-
-export function sceneLink(sceneId: string, options: { display?: boolean } = {}): string {
-  return `${location.origin}${scenePath(sceneId)}${options.display ? '?view=present' : ''}`
-}
-
-export function createSceneId(): string {
-  const bytes = crypto.getRandomValues(new Uint32Array(8))
-  let index = 0
-  return newSceneId(() => bytes[index++]! / 2 ** 32)
-}
-
 const clientId = crypto.randomUUID()
 let sceneId = MAIN_SCENE_ID
+/** Classroom displays receive everything and send nothing; the server enforces it too. */
+let viewOnly = false
+/** The server refused this browser for good: no more reconnect attempts. */
+let stopped = false
 let seed: Board | undefined
 let socket: WebSocket | undefined
 /** The scene as the server will have it once everything this browser sent is applied. */
@@ -97,6 +87,7 @@ export function flushLive() {
   if (sendTimer) { clearTimeout(sendTimer); sendTimer = undefined }
   if (!joined || !shadow || socket?.readyState !== WebSocket.OPEN) return
   const board = useBoard.getState().board
+  if (viewOnly) { shadow = board; return }
   const patch = diffBoards(shadow, board)
   shadow = board
   if (isEmptyPatch(patch)) return
@@ -133,8 +124,25 @@ function resync() {
   retryTimer = setTimeout(connect, 50)
 }
 
+function setAccess(access: RoomAccess, id: string) {
+  useLive.setState({ access, waitingForHost: false })
+  if (access.host && (access.kind === 'solo' || access.kind === 'shared')) updateHostedKind(id, access.kind)
+}
+
+/** Stops for good: the server will not let this browser in, so retrying only adds noise. */
+function refused(code: string, text: string) {
+  stopped = true
+  if (retryTimer) { clearTimeout(retryTimer); retryTimer = undefined }
+  useLive.setState({ denied: { code, message: text }, connection: 'connecting', waitingForHost: false })
+  const held = socket
+  socket = undefined
+  joined = false
+  held?.close()
+}
+
 function onState(message: Extract<ServerMessage, { type: 'state' }>) {
   setClockOffset(message.now - Date.now())
+  if (message.access) setAccess(message.access, sceneId)
   // Changes the server never confirmed, and edits made while disconnected, go back on top of its state.
   const local = useBoard.getState().board
   // The scene switched scenario while this browser was away: edits made on the old one must not land on the new one.
@@ -209,7 +217,7 @@ function onReplace(message: Extract<ServerMessage, { type: 'replace' }>) {
 
 /** Switches everyone in this scene to another scenario. Returns false when not connected. */
 export function sendScenarioSwitch(seedBoard: Board): boolean {
-  if (!joined || socket?.readyState !== WebSocket.OPEN) return false
+  if (viewOnly || !joined || socket?.readyState !== WebSocket.OPEN) return false
   flushLive()
   send({ type: 'switch', id: String(++messageCounter), key: scenarioKey(seedBoard), seed: seedBoard })
   return true
@@ -233,10 +241,22 @@ function handle(message: ServerMessage) {
     case 'presence':
       useLive.setState({ peers: message.peers })
       return
+    case 'room':
+      setAccess(message.access, sceneId)
+      if (message.access.status === 'ended') refused('ended', 'The host ended this simulation.')
+      return
     case 'pong':
       setClockOffset(message.now - Date.now())
       return
     case 'error':
+      if (message.code === 'read-only') return
+      if (message.code === 'not-ready') {
+        // The invitation is good; the host just has not opened it yet. Keep trying quietly.
+        useLive.setState({ waitingForHost: true })
+        socket?.close()
+        return
+      }
+      if (message.code) { refused(message.code, message.message); return }
       useUi.getState().toast(message.message, 'warning')
       if (message.id && inflight.has(message.id)) { discardOnResync = true; resync() }
       else if (!joined) socket?.close()
@@ -250,13 +270,14 @@ function connect() {
   socket = ws
   ws.addEventListener('open', () => {
     lastHeardAt = Date.now()
-    send({ type: 'hello', clientId, seed: seed ?? useBoard.getState().board })
+    const hostKey = hostKeyFor(sceneId)
+    send({ type: 'hello', clientId, seed: seed ?? useBoard.getState().board, ...(hostKey ? { hostKey } : {}), ...(viewOnly ? { role: 'view' as const } : {}) })
   })
   ws.addEventListener('message', (event: MessageEvent<string>) => {
     try { handle(JSON.parse(event.data) as ServerMessage) } catch (error) { console.error('Live update failed', error) }
   })
   ws.addEventListener('close', () => {
-    if (socket !== ws) return
+    if (socket !== ws || stopped) return
     joined = false
     useLive.setState({ connection: everJoined ? 'reconnecting' : 'connecting' })
     const delay = Math.min(MAX_RETRY_MS, 600 * 2 ** retries) * (0.75 + Math.random() * 0.5)
@@ -265,10 +286,11 @@ function connect() {
   })
 }
 
-/** Starts working on a live scene. `seedBoard` is what a brand-new scene starts as. */
-export function startLive(id: string, seedBoard: Board) {
+/** Starts working on a live scene. `seedBoard` is what a brand-new scene starts as (only its owner's board is ever used). */
+export function startLive(id: string, seedBoard: Board, options: { viewOnly?: boolean } = {}) {
   sceneId = id
   seed = seedBoard
+  viewOnly = Boolean(options.viewOnly)
   // Whatever is on screen now is the starting point: edits made before the first connection are sent once it opens.
   shadow = useBoard.getState().board
   useLive.setState({ sceneId: id, connection: 'connecting' })
@@ -290,6 +312,7 @@ export function startLive(id: string, seedBoard: Board) {
 }
 
 function reconnectNow() {
+  if (stopped) return
   if (socket && socket.readyState <= WebSocket.OPEN) return
   if (retryTimer) clearTimeout(retryTimer)
   retries = 0

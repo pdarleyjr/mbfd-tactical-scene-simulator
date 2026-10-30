@@ -52,16 +52,17 @@ curl -fsS http://127.0.0.1:8230/sync-api/health
 
 Restarting `sync` disconnects everyone for a moment; browsers reconnect on their own and keep their edits. The service saves every open scene (and snapshots it) when it receives SIGTERM, within the 20 s stop grace period.
 
-There are no migrations. Saved scenes are validated when loaded; scene schema changes must stay backward compatible or ship an in-app migration (damaged objects are salvaged individually).
+There are no migrations: scenes without a `room.json` are treated as open shared scenes that never expire, exactly as before. Saved scenes are validated when loaded; scene schema changes must stay backward compatible or ship an in-app migration (damaged objects are salvaged individually).
 
 ## Live scene data
 
 Live scenes are in the `mbfd-tactical-scene-simulator_live_scenes` volume (`/data` in the sync container):
 
 ```text
-scenes/main/current.json          the main scene
+scenes/main/current.json          the original main scene (shared before rooms had owners; never expires)
 scenes/main/history/*.json        automatic snapshots (newest 100)
-scenes/<id>/...                   separate scenes
+scenes/<id>/current.json          a simulation (same layout for every scene)
+scenes/<id>/room.json             who owns it: kind (solo or shared), SHA-256 of the host key, locked, status. Absent on scenes that predate rooms.
 media/<uuid>.<ext>                uploaded maps and videos
 ```
 
@@ -82,3 +83,12 @@ Any snapshot can be restored for everyone from **Scenes → Saved versions** in 
 ## Hosting elsewhere
 
 The web build (`apps/web/dist`) is static files, but shared scenes need the sync service on the same origin at `/sync`, `/sync-api`, and `/media` (see `Caddyfile`). Without it the app still opens and works, showing `Connecting…`, with edits kept only in that browser.
+
+## Room lifecycle and limits
+
+Rooms started from the start screen are created with `POST /sync-api/rooms` (the server picks the id and returns the host key once; only its hash is stored). Host actions are `POST /sync-api/rooms/<id>/{lock,unlock,end,reopen,share}` with the host key in the body. Saved versions of a private or locked simulation need the host key in an `X-Host-Key` header.
+
+- A sweep runs every 10 minutes. Active rooms unused for 60 days (private) or 30 days (shared) become *ended*; ended rooms are deleted after 7 days. A host can reopen an ended room until then. Rooms with someone connected, and scenes without a `room.json`, are never touched. The sweep logs `Room lifecycle: ended N, deleted N`.
+- Limits: 120 new rooms per hour per visitor address, 1000 scenes in total (new rooms get HTTP 503 beyond that), 40 connections per address and 150 people per room as before. A department-wide network address counts as one address.
+- Host keys live in each browser's local storage. A host who clears site data loses host rights for that simulation (the data is untouched); the *continue on another device* owner link restores them. There is no server-side recovery of a lost host key.
+- If a `room.json` cannot be read the room is refused (fail closed) instead of opening to everyone. Fix or restore the file from backup.

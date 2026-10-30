@@ -3,10 +3,20 @@ import { expect, test, type Browser, type Page } from '@playwright/test'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Sim = any
 
-/** Every test works in its own live scene, so parallel tests never share one. */
-function freshSceneId() {
-  const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
-  return Array.from({ length: 10 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')
+/**
+ * Every test works in its own simulation, so parallel tests never share one.
+ * The test is the host: the room is made through the same API the start screen
+ * uses and its host key is put where the app keeps it.
+ */
+async function newRoom(page: Page, kind: 'solo' | 'shared') {
+  const response = await page.request.post('/sync-api/rooms', { data: { kind } })
+  expect(response.status()).toBe(201)
+  const room = await response.json() as { id: string; hostKey: string }
+  await page.addInitScript(([id, hostKey, roomKind]) => {
+    const list = JSON.parse(localStorage.getItem('mbfd-hosted-rooms') ?? '[]') as Array<{ id: string }>
+    if (!list.some((item) => item.id === id)) localStorage.setItem('mbfd-hosted-rooms', JSON.stringify([{ id, kind: roomKind, hostKey, createdAt: Date.now() }, ...list]))
+  }, [room.id, room.hostKey, kind] as const)
+  return room.id
 }
 
 async function ready(page: Page) {
@@ -15,7 +25,9 @@ async function ready(page: Page) {
   await page.waitForTimeout(150)
 }
 
-async function open(page: Page, sceneId = freshSceneId(), query = '') {
+/** Opens a simulation. With no id the test starts its own (private unless `kind` says shared); with an id it joins as a guest. */
+async function open(page: Page, sceneId?: string, query = '', kind: 'solo' | 'shared' = 'solo') {
+  sceneId ??= await newRoom(page, kind)
   await page.goto(`/s/${sceneId}${query}`)
   await ready(page)
   return sceneId
@@ -371,12 +383,13 @@ test.describe('Shared live scenes', () => {
   }
 
   test('two people in the same scene see each other’s work live, and undo is per person', async ({ page, browser }) => {
-    const sceneId = await open(page)
+    const sceneId = await open(page, undefined, '', 'shared')
     const other = await secondBrowser(browser)
     try {
       await open(other.page, sceneId)
       await expect(page.getByTestId('live-status')).toHaveAttribute('data-peers', '2')
-      await expect(other.page.getByTestId('in-use-banner')).toBeVisible()
+      // An invitation is a choice, so there is no "someone is already here" warning.
+      await expect(other.page.getByTestId('in-use-banner')).toHaveCount(0)
 
       await placeUnit(page, 'E1', 900, 600)
       await expect.poll(async () => (await unitOf(other.page, 'E1'))?.x).toBeCloseTo(900, 0)
@@ -401,27 +414,28 @@ test.describe('Shared live scenes', () => {
     }
   })
 
-  test('starts a separate scene with its own link that does not touch the first', async ({ page, browser }) => {
-    const sceneId = await open(page)
+  test('a guest can start a simulation of their own that does not touch the shared one', async ({ page, browser }) => {
+    const sceneId = await open(page, undefined, '', 'shared')
     const other = await secondBrowser(browser)
     try {
       await open(other.page, sceneId)
-      await other.page.getByTestId('banner-separate-scene').click()
+      await other.page.getByTestId('live-status').click()
+      await other.page.getByTestId('start-separate-scene').click()
       await other.page.waitForURL((url) => !url.pathname.endsWith(sceneId))
       await ready(other.page)
-      expect(new URL(other.page.url()).pathname).toMatch(/^\/s\/[a-z0-9]{8}$/)
+      expect(new URL(other.page.url()).pathname).toMatch(/^\/s\/[a-z0-9]{12}$/)
       await placeUnit(other.page, 'E3', 700, 500)
       await page.waitForTimeout(500)
       expect(await unitOf(page, 'E3')).toBeUndefined()
       await expect(page.getByTestId('live-status')).toHaveAttribute('data-peers', '1')
-      await expect(other.page.getByTestId('scene-title')).toContainText('Separate scene')
+      await expect(other.page.locator('.topbar__eyebrow')).toContainText('My simulation')
     } finally {
       await other.context.close()
     }
   })
 
   test('the classroom display shows the scene live and cannot be edited', async ({ page, browser }) => {
-    const sceneId = await open(page)
+    const sceneId = await open(page, undefined, '', 'shared')
     await placeUnit(page, 'E2', 850, 600)
     const tv = await secondBrowser(browser)
     try {
@@ -458,7 +472,7 @@ test.describe('Shared live scenes', () => {
   })
 
   test('keeps working through a dropped connection and shares the edits when it returns', async ({ page, browser }) => {
-    const sceneId = await open(page)
+    const sceneId = await open(page, undefined, '', 'shared')
     const other = await secondBrowser(browser)
     try {
       await open(other.page, sceneId)
@@ -480,7 +494,7 @@ test.describe('Scenarios and fire effects', () => {
   }
 
   test('switching scenario moves everyone, and each scenario keeps its own work', async ({ page, browser }) => {
-    const sceneId = await open(page)
+    const sceneId = await open(page, undefined, '', 'shared')
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
     const other = await context.newPage()
     try {
@@ -514,7 +528,7 @@ test.describe('Scenarios and fire effects', () => {
   })
 
   test('a device that was offline during a switch rejoins on the new scenario without carrying old edits into it', async ({ page, browser }) => {
-    const sceneId = await open(page)
+    const sceneId = await open(page, undefined, '', 'shared')
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
     const other = await context.newPage()
     try {
@@ -588,7 +602,7 @@ test.describe('Scenarios and fire effects', () => {
   })
 
   test('places, sizes, and moves flames and a smoke plume that everyone sees', async ({ page, browser }) => {
-    const sceneId = await open(page)
+    const sceneId = await open(page, undefined, '', 'shared')
     await page.keyboard.press('m')
     await page.locator('[data-marker="flames"]').click()
     await clickWorld(page, 700, 400)

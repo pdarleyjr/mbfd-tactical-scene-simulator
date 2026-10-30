@@ -1,8 +1,8 @@
 # MBFD Tactical Scene Simulator
 
-A shared, live fireground training board for Miami Beach Fire Department. Open the site and the **Residential Structure Fire, Waterfront Estate** scenario is on screen, ready to work: place MBFD apparatus, lay and edit hose, establish water supply, mark the scene, run the training clock and injects, present on a classroom display, and replay the run at the debrief.
+A live fireground training board for Miami Beach Fire Department. Open the site, choose **Start My Own Simulation**, and the **Residential Structure Fire, Waterfront Estate** scenario is on screen, ready to work: place MBFD apparatus, lay and edit hose, establish water supply, mark the scene, run the training clock and injects, present on a classroom display, and replay the run at the debrief.
 
-No accounts, rooms, PINs, or unit logins. Everyone who opens the site works on the same scene together, live.
+No accounts, PINs, or unit logins. Everyone starts in a private simulation of their own; working together is a deliberate choice made with an invite link.
 
 ## What it does
 
@@ -18,7 +18,7 @@ No accounts, rooms, PINs, or unit logins. Everyone who opens the site works on t
 | Training | Dispatch text, initial-conditions video, scenario clock, injects (manual or auto at a time) shown as a banner, benchmarks with completion times, snapshots with compare-overlay and restore, debrief notes, downloadable debrief summary. |
 | Presentation | **Present** shows the scene full screen with a large title, clock, inject banner, and benchmarks, and every change anyone makes appears on it as it happens. **Display link** (in Present, or in the Live menu) opens a view-only copy for a classroom TV or projector: it follows the scene live, fits any screen, and cannot be edited. Chrome scales up on 4K panels. |
 | Review | Starting the clock records every change. Replay scrubs or plays the actual board state over time with benchmark and inject markers. |
-| Sharing and saving | The scene is shared live and saved on the server automatically. The top bar shows **Live** and how many people are here. Arriving while others are working shows a notice with **Start a separate scene**, which opens a fresh scene with its own link. The server keeps automatic saved versions (every few minutes, before a reset or restore, and when the last person leaves) that can be restored from **Scenes**. Non-destructive reset to the original scenario, portable scene files (export, and import as a separate scene), PNG export. Undo only takes back your own changes. |
+| Sharing and saving | The simulation is saved on the server automatically. The top bar shows **Live** and, in a shared simulation, how many people are here. The Live menu copies the invite and classroom display links and lets a host lock or end a shared simulation. The server keeps automatic saved versions (every few minutes, before a reset or restore, and when the last person leaves) that can be restored from **Scenes**. Non-destructive reset to the original scenario, portable scene files (export, and import as a separate scene), PNG export. Undo only takes back your own changes. |
 | New scenarios | "New scenario from an image": upload an aerial or plan image (it becomes a separate live scene), set the title and dispatch, calibrate, and build. Injects, benchmarks, video, hose loads, and verified apparatus lengths are editable in Scenario settings. |
 
 ## Sources of the numbers
@@ -29,11 +29,16 @@ No accounts, rooms, PINs, or unit logins. Everyone who opens the site works on t
 - The map only moves when asked to: right/middle-drag, Space + drag, two fingers, the zoom buttons, or the wheel. Dragging empty map selects an area.
 - Water supply shows connections only; no pressure or flow is calculated.
 
-## Shared live scenes
+## Private and shared simulations
 
-- / is the **main scene**. Everyone who opens the site lands there and sees the same board.
-- /s/<id> is a **separate scene** (for example a second crew, or a drill that should not disturb the class). **Start a separate scene** creates one; **Copy link to this scene** shares it.
-- ?view=present on either address is the **classroom display**: view-only, full screen, always live.
+The site address opens a start screen. Nobody lands in someone else's scene by visiting it.
+
+- **Start My Own Simulation** (the default): a private simulation. Only the browser that started it (or a device the owner continues on with **Copy link to continue on another device**) can open and change it. Two people starting their own at the same moment get separate simulations. The start screen offers **Continue** for the ones started in this browser.
+- **Start a Shared Simulation**: the same board, but anyone holding the invite link (or its code, pasted into **Join with an invite**) joins and edits it live. The person who started it is the **host**: they can lock it so nobody new joins, end it for everyone, reopen it, and restore saved versions. A private simulation can be shared later from the Live menu (**Share with others**).
+- A simulation lives at /s/<id>. The id is random and 12 characters long, so the link is the invitation. A link to a simulation that does not exist, has ended, or is locked shows a plain explanation instead of a scene, and visiting an address never creates one.
+- ?view=present on a simulation address is the **classroom display**: view-only, full screen, always live. The server enforces view-only, so a display can never change the scene. A private simulation can be shown on a display with its display link.
+- Simulations nobody has opened or edited for a long time end (60 days for private ones, 30 days for shared ones). A host can reopen an ended simulation for 7 days; after that it is deleted. Simulations in use are never touched.
+- Scenes shared before this release keep working at their /s/<id> links; the original main scene is now /s/main. They are never expired and have no host. The old display bookmark ?view=present at the bare address still shows the main scene, read only.
 - Changes merge per object, so two people can work on different units at the same moment. If two people move the same unit at once, the last move wins.
 - If the connection drops, work continues and is shared when it returns. Each browser also keeps a cached copy for a fast start.
 - Boards saved in a browser before scenes were shared are listed under **Saved on this device** in Scenes and can be opened as separate scenes.

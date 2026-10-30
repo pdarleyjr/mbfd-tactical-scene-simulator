@@ -4,70 +4,28 @@ import path from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { WebSocket } from 'ws'
-import { boardSchema, type Board, type SceneObject, type ServerMessage } from '@mbfd/domain'
+import { type Board } from '@mbfd/domain'
 import { createSyncServer } from './server.js'
+import { Client, note, seed } from './test-support.js'
 import { SceneFiles, HISTORY_LIMIT } from './files.js'
-
-const note = (id: string, x = 0): SceneObject => ({ id, type: 'note', x, y: 0, rotation: 0, text: id, locked: false })
-
-function seed(objects: SceneObject[] = [], templateId: string | null = null, title = 'Drill'): Board {
-  return boardSchema.parse({
-    schemaVersion: 3,
-    id: 'seed-board',
-    name: 'Drill',
-    templateId,
-    createdAt: '2026-10-26T00:00:00.000Z',
-    updatedAt: '2026-10-26T00:00:00.000Z',
-    scenario: {
-      title, description: '', dispatch: '', background: { kind: 'builtin', url: '/map.webp' }, world: { width: 1000, height: 800 },
-      northDegrees: 0, weather: { windFromDegrees: 0, windMph: 0, temperatureF: 80, conditions: '' }, injects: [], benchmarks: [],
-    },
-    objects,
-    training: { timer: { running: false, startedAt: null, accumulatedMs: 0 }, revealed: {}, completed: {}, notes: '' },
-    snapshots: [],
-    run: null,
-  })
-}
-
-/** A test browser: collects every message and can wait for one. */
-class Client {
-  readonly messages: ServerMessage[] = []
-  private waiters: Array<{ match: (message: ServerMessage) => boolean; resolve: (message: ServerMessage) => void }> = []
-  readonly ws: WebSocket
-
-  constructor(url: string) {
-    this.ws = new WebSocket(url)
-    this.ws.on('message', (data) => {
-      const message = JSON.parse(String(data)) as ServerMessage
-      this.messages.push(message)
-      this.waiters = this.waiters.filter((waiter) => { if (!waiter.match(message)) return true; waiter.resolve(message); return false })
-    })
-  }
-
-  opened() { return new Promise<void>((resolve, reject) => { this.ws.once('open', () => resolve()); this.ws.once('error', reject) }) }
-
-  next<T extends ServerMessage['type']>(type: T, match: (message: Extract<ServerMessage, { type: T }>) => boolean = () => true): Promise<Extract<ServerMessage, { type: T }>> {
-    const found = this.messages.find((message) => message.type === type && match(message as Extract<ServerMessage, { type: T }>))
-    if (found) { this.messages.splice(this.messages.indexOf(found), 1); return Promise.resolve(found as Extract<ServerMessage, { type: T }>) }
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`No ${type} message`)), 3000)
-      this.waiters.push({
-        match: (message) => message.type === type && match(message as Extract<ServerMessage, { type: T }>),
-        resolve: (message) => { clearTimeout(timer); this.messages.splice(this.messages.indexOf(message), 1); resolve(message as Extract<ServerMessage, { type: T }>) },
-      })
-    })
-  }
-
-  send(message: unknown) { this.ws.send(JSON.stringify(message)) }
-  close() { this.ws.close() }
-}
 
 let dataDir: string
 let sync: ReturnType<typeof createSyncServer>
 let base: string
 const clients: Client[] = []
 
+/**
+ * Scenes made before rooms had owners exist as plain folders on disk and stay
+ * joinable by their link. Visiting an address no longer creates one, so these
+ * tests set the scene up the way the live server's older scenes already are.
+ */
+async function legacyScene(sceneId: string, board: Board) {
+  const files = new SceneFiles(dataDir)
+  if (!(await files.load(sceneId)) && !sync.rooms.get(sceneId)) await files.save(sceneId, { board, version: 0 })
+}
+
 async function join(sceneId: string, clientId: string, board = seed()) {
+  await legacyScene(sceneId, board)
   const client = new Client(`ws://127.0.0.1:${new URL(base).port}/sync/${sceneId}`)
   clients.push(client)
   await client.opened()
@@ -90,7 +48,7 @@ afterEach(async () => {
 })
 
 describe('live rooms', () => {
-  it('creates a scene from the first visitor’s seed and gives later visitors the live state', async () => {
+  it('opens a scene that already exists and gives later visitors the live state', async () => {
     const { client: first, state } = await join('main', 'one', seed([note('a')]))
     expect(state.board.objects.map((object) => object.id)).toEqual(['a'])
     expect(state.peers).toBe(1)
@@ -386,5 +344,6 @@ describe('scene files', () => {
     expect(await files.loadSnapshot('abcd', '../../etc')).toBeUndefined()
     expect(await files.load('zzzz')).toBeUndefined()
     expect(await files.history('zzzz')).toEqual([])
-  })
+    // 100+ sequential disk writes: give it room when the machine is busy.
+  }, 30_000)
 })

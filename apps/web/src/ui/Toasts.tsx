@@ -1,7 +1,7 @@
 import { X } from 'lucide-react'
 import { useUi } from '../store/ui'
 import { useLive } from '../lib/live'
-import { openAsSeparateScene } from '../lib/workspace'
+import { startOwnSimulation } from '../lib/workspace'
 
 export function Toasts() {
   const toasts = useUi((state) => state.toasts)
@@ -24,17 +24,23 @@ export function Banners() {
   const connection = useLive((state) => state.connection)
   const peers = useLive((state) => state.peers)
   const arrived = useLive((state) => state.arrivedToCompany)
+  const legacy = useLive((state) => state.access?.kind === 'legacy')
+  const waiting = useLive((state) => state.waitingForHost)
   const display = useUi((state) => state.display)
   if (connection === 'reconnecting') {
     return <div className="banner banner--warning" role="alert" data-testid="offline-banner"><span>Connection lost. Keep working: changes stay on this device and are shared as soon as it reconnects.</span></div>
   }
-  if (arrived && !display && peers > 1) {
+  if (waiting) {
+    return <div className="banner banner--info" role="status" data-testid="waiting-banner"><span>The host has not opened this simulation yet. This page joins as soon as they do.</span></div>
+  }
+  // Only older links can land someone among people they did not expect; an invite to a shared simulation is a choice.
+  if (arrived && legacy && !display && peers > 1) {
     const others = peers - 1
     return (
       <div className="banner banner--info" role="alert" data-testid="in-use-banner">
         <span>{others === 1 ? 'Someone is' : `${others} people are`} already working in this scene. Changes show up for everyone live.</span>
         <button type="button" className="btn btn--primary" onClick={() => useLive.getState().setArrivalNoticeSeen()}>Work together</button>
-        <button type="button" className="btn btn--quiet" onClick={() => void openAsSeparateScene()} data-testid="banner-separate-scene">Start a separate scene</button>
+        <button type="button" className="btn btn--quiet" onClick={() => void startOwnSimulation()} data-testid="banner-separate-scene">Start my own simulation</button>
       </div>
     )
   }

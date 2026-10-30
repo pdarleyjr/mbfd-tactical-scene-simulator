@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { boardSchema, scenarioKeySchema, sceneIdSchema, type Board } from '@mbfd/domain'
@@ -39,7 +39,7 @@ function parseScene(text: string): StoredScene | undefined {
   }
 }
 
-async function writeAtomic(file: string, text: string) {
+export async function writeAtomic(file: string, text: string) {
   const temporary = `${file}.${randomUUID()}.tmp`
   await writeFile(temporary, text, 'utf8')
   await rename(temporary, file)
@@ -167,6 +167,36 @@ export class SceneFiles {
       return undefined
     })
   }
+
+  /** Folder names of every stored scene, for lifecycle sweeps. Names that are not valid scene ids are ignored. */
+  async sceneIds(): Promise<string[]> {
+    try { return (await readdir(path.join(this.root, 'scenes'))).filter((name) => sceneIdSchema.safeParse(name).success) } catch { return [] }
+  }
+
+  /** When the scene's board was last saved, or 0 when it has none. */
+  async savedAt(id: string): Promise<number> {
+    try { return (await stat(path.join(this.folder(id), 'current.json'))).mtimeMs } catch { return 0 }
+  }
+
+  /** Deletes a whole scene folder (board, history, parked scenarios, room record). Only the lifecycle sweep calls this. */
+  async remove(id: string) {
+    const folder = this.folder(id)
+    await this.queue(id, () => rm(folder, { recursive: true, force: true }))
+  }
+
+  async hasFolder(id: string): Promise<boolean> {
+    try { await stat(this.folder(id)); return true } catch { return false }
+  }
+
+  scenesFolder() {
+    return path.join(this.root, 'scenes')
+  }
+
+  /** Where a scene's own files live, for the room record. */
+  roomFolder(id: string) {
+    return this.folder(id)
+  }
+
   async sceneCount(): Promise<number> {
     try { return (await readdir(path.join(this.root, 'scenes'))).length } catch { return 0 }
   }

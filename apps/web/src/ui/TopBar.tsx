@@ -6,14 +6,13 @@ import { useUi } from '../store/ui'
 import { exportCurrentBoard, exportImage } from '../lib/workspace'
 import { LiveMenu } from './LiveMenu'
 import { useLive } from '../lib/live'
-import { MAIN_SCENE_ID } from '@mbfd/domain'
 import { useElapsed } from '../hooks/useElapsed'
 import { formatElapsed } from '../lib/format'
 import { enterPresentation } from '../lib/presentation'
 
 export function TopBar() {
   const board = useBoard((state) => state.board)
-  const sceneId = useLive((state) => state.sceneId)
+  const kind = useLive((state) => state.access?.kind ?? 'shared')
   const togglePanel = useUi((state) => state.togglePanel)
   const panel = useUi((state) => state.panel)
   const openDialog = useUi((state) => state.openDialog)
@@ -29,7 +28,7 @@ export function TopBar() {
       <div className="topbar__left">
         <img className="topbar__mark" src="/mbfd-seal-96.webp" alt="Miami Beach Fire Department" width={40} height={40} />
         <button type="button" className="topbar__title" onClick={() => openDialog('library')} aria-label="Open scenes and saved versions" data-testid="scene-title">
-          <span className="topbar__eyebrow">{sceneId === MAIN_SCENE_ID ? 'Main scene' : 'Separate scene'}{board.name !== board.scenario.title ? ` · ${board.name}` : ''}</span>
+          <span className="topbar__eyebrow">{kind === 'solo' ? 'My simulation' : kind === 'shared' ? 'Shared simulation' : 'Shared scene'}{board.name !== board.scenario.title ? ` · ${board.name}` : ''}</span>
           <span className="topbar__name">{board.scenario.title}<ChevronDown size={16} aria-hidden /></span>
         </button>
         <LiveMenu />

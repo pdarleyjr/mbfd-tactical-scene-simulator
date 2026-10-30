@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyScenePatch, clientMessageSchema, diffBoards, isEmptyPatch, newSceneId, scenarioKey, sceneIdSchema, withoutPendingChanges } from './sync.js'
+import { applyScenePatch, clientMessageSchema, diffBoards, hostKeySchema, isEmptyPatch, newSceneId, ROOM_ID_LENGTH, scenarioKey, sceneIdSchema, withoutPendingChanges } from './sync.js'
 import type { Board, SceneObject } from './scene.js'
 
 const note = (id: string, x = 0, text = id): SceneObject => ({ id, type: 'note', x, y: 0, rotation: 0, text, locked: false })
@@ -38,6 +38,32 @@ describe('scene ids', () => {
     expect(id).toMatch(/^[a-z0-9]{8}$/)
     expect(id).not.toMatch(/[il01o]/)
     expect(sceneIdSchema.safeParse(newSceneId()).success).toBe(true)
+  })
+
+  it('makes the longer ids new rooms use, which are long enough to act as an invitation', () => {
+    const id = newSceneId(Math.random, ROOM_ID_LENGTH)
+    expect(id).toMatch(/^[a-z0-9]{12}$/)
+    expect(sceneIdSchema.safeParse(id).success).toBe(true)
+    // 31 symbols over 12 places is about 59 bits: not something to guess by trying addresses.
+    expect(Math.log2(31 ** ROOM_ID_LENGTH)).toBeGreaterThan(55)
+  })
+})
+
+describe('room access in the protocol', () => {
+  const seedBoard = board()
+
+  it('accepts a hello with or without a host key and a display role, and rejects malformed ones', () => {
+    expect(clientMessageSchema.safeParse({ type: 'hello', clientId: 'c', seed: seedBoard }).success).toBe(true)
+    expect(clientMessageSchema.safeParse({ type: 'hello', clientId: 'c', seed: seedBoard, hostKey: 'k'.repeat(32), role: 'view' }).success).toBe(true)
+    expect(clientMessageSchema.safeParse({ type: 'hello', clientId: 'c', seed: seedBoard, role: 'admin' }).success).toBe(false)
+    expect(clientMessageSchema.safeParse({ type: 'hello', clientId: 'c', seed: seedBoard, hostKey: 'short' }).success).toBe(false)
+    expect(clientMessageSchema.safeParse({ type: 'hello', clientId: 'c', seed: seedBoard, hostKey: '../../etc/passwd-and-more' }).success).toBe(false)
+  })
+
+  it('only lets url-safe host keys of a sensible length through', () => {
+    expect(hostKeySchema.safeParse('A'.repeat(32)).success).toBe(true)
+    expect(hostKeySchema.safeParse('abc_DEF-123'.padEnd(24, 'x')).success).toBe(true)
+    for (const bad of ['', 'x'.repeat(19), 'x'.repeat(65), 'has space'.padEnd(30, 'x'), 'sl/ash'.padEnd(30, 'x')]) expect(hostKeySchema.safeParse(bad).success).toBe(false)
   })
 })
 
