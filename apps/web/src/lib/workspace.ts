@@ -6,7 +6,9 @@ import { canvasApi } from '../canvas/api'
 import { buildExportFile, downloadBlob, downloadText, exportFileName, parseSceneFile } from './scene-files'
 import { getStorage } from './session'
 import { offerUndo } from './undo'
-import { createSceneId, flushLive, goToScene, sendScenarioSwitch, isDisplayView, onLiveBoardChange, sceneIdFromPath, startLive, useLive } from './live'
+import { flushLive, goToScene, sendScenarioSwitch, onLiveBoardChange, startLive, useLive } from './live'
+import { adoptOwnerLink, createRoom, hostHeaders, type HostedKind } from './rooms'
+import type { Route } from './route'
 import { shareBoardMedia, uploadMedia } from './media'
 import { rememberScene } from './recent'
 
@@ -27,14 +29,15 @@ function restore(raw: unknown): Board | undefined {
  * Opens the live scene named by the address. The last copy this browser saw
  * shows at once; the server's version replaces it as soon as it connects.
  */
-export async function bootWorkspace() {
-  const sceneId = sceneIdFromPath(location.pathname)
+export async function bootWorkspace(route: Extract<Route, { kind: 'scene' }>) {
+  const { sceneId } = route
+  adoptOwnerLink(sceneId)
   const storage = await getStorage()
   const seed = restore(await storage.getMeta(seedKey(sceneId))) ?? boardFromTemplate()
   const cached = restore(await storage.getMeta(cacheKey(sceneId)))
   useBoard.getState().setBoard(cached ?? seed, { live: true })
-  if (isDisplayView(location.search)) useUi.getState().setDisplay(true)
-  startLive(sceneId, seed)
+  if (route.display) useUi.getState().setDisplay(true)
+  startLive(sceneId, seed, { viewOnly: route.display })
   let cacheTimer: ReturnType<typeof setTimeout> | undefined
   onLiveBoardChange(() => {
     if (cacheTimer) clearTimeout(cacheTimer)
@@ -52,16 +55,29 @@ export async function bootWorkspace() {
   rememberScene(sceneId, (cached ?? seed).name)
 }
 
-/** Opens a new, separate live scene in this tab, starting from `board`. */
-export async function openAsSeparateScene(board?: Board) {
-  const id = createSceneId()
+/**
+ * Starts a new simulation on the server and opens it in this tab, starting
+ * from `board` (the original scenario when omitted). Throws with a message
+ * fit to show when the server cannot be reached or refuses.
+ */
+export async function beginSimulation(kind: HostedKind, board?: Board) {
+  const room = await createRoom(kind)
   if (board) {
     const storage = await getStorage()
     const shared = await shareBoardMedia(board, storage)
     if (shared.missing) useUi.getState().toast('Some media was not found on this device and must be re-attached.', 'warning')
-    await storage.setMeta(seedKey(id), shared.board)
+    await storage.setMeta(seedKey(room.id), shared.board)
   }
-  goToScene(id)
+  goToScene(room.id)
+}
+
+/** Opens a new private simulation in this tab, starting from `board`. For menus: failures show as a message. */
+export async function startOwnSimulation(board?: Board) {
+  try {
+    await beginSimulation('solo', board)
+  } catch (error) {
+    useUi.getState().toast(error instanceof Error ? error.message : 'The simulation could not be started.', 'error')
+  }
 }
 
 /**
@@ -111,7 +127,7 @@ export async function importSceneFile(file: File) {
     const [first] = result.boards
     if (!first) { useUi.getState().toast('Nothing in that file could be imported.', 'error'); return }
     if (result.boards.length > 1) useUi.getState().toast(`The other ${result.boards.length - 1} scenes were kept under Saved on this device.`, 'info')
-    await openAsSeparateScene(first)
+    await startOwnSimulation(first)
   } catch (error) {
     useUi.getState().toast(error instanceof Error ? error.message : 'That file could not be imported.', 'error')
   }
@@ -154,7 +170,7 @@ export async function newScenarioFromImage(file: File, title: string) {
   delete board.scenario.video
   delete board.scenario.poster
   delete board.scenario.calibration
-  await openAsSeparateScene(board)
+  await startOwnSimulation(board)
 }
 
 export async function replaceBackground(file: File) {
@@ -187,7 +203,7 @@ export async function openDeviceBoard(id: string) {
   const record = await (await getStorage()).getBoard(id)
   const board = record ? restore(record.board) : undefined
   if (!board) { useUi.getState().toast('That scene could not be opened.', 'error'); return }
-  await openAsSeparateScene(board)
+  await startOwnSimulation(board)
 }
 
 export async function deleteDeviceBoard(id: string) {
@@ -212,7 +228,7 @@ export interface ServerSnapshot {
 
 /** Automatic snapshots the server keeps for this scene, newest first. */
 export async function listServerSnapshots(sceneId: string): Promise<ServerSnapshot[]> {
-  const response = await fetch(`/sync-api/scenes/${sceneId}/history`)
+  const response = await fetch(`/sync-api/scenes/${sceneId}/history`, { headers: hostHeaders(sceneId) })
   if (!response.ok) throw new Error('Saved versions could not be loaded.')
   return ((await response.json()) as { items: ServerSnapshot[] }).items
 }
@@ -220,7 +236,7 @@ export async function listServerSnapshots(sceneId: string): Promise<ServerSnapsh
 /** Puts a saved version back for everyone. The current state is snapshotted first. */
 export async function restoreServerSnapshot(sceneId: string, name: string) {
   flushLive()
-  const response = await fetch(`/sync-api/scenes/${sceneId}/history/${encodeURIComponent(name)}/restore`, { method: 'POST' })
-  if (!response.ok) throw new Error('That version could not be restored.')
+  const response = await fetch(`/sync-api/scenes/${sceneId}/history/${encodeURIComponent(name)}/restore`, { method: 'POST', headers: hostHeaders(sceneId) })
+  if (!response.ok) throw new Error(response.status === 403 ? 'Only the host can restore a saved version of this simulation.' : 'That version could not be restored.')
   useUi.getState().toast('Saved version restored for everyone. The previous state was kept as a snapshot.', 'success')
 }

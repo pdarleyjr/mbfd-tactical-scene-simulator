@@ -1,10 +1,14 @@
-import { applyScenePatch, isEmptyPatch, MAX_SCENE_OBJECTS, scenarioKey, sceneIdSchema, type Board, type ScenePatch, type ServerMessage } from '@mbfd/domain'
+import { applyScenePatch, isEmptyPatch, MAX_SCENE_OBJECTS, scenarioKey, sceneIdSchema, type Board, type RoomAccess, type ScenePatch, type ServerMessage } from '@mbfd/domain'
 import type { SceneFiles } from './files.js'
 
 /** A connected browser, reduced to what a room needs. */
 export interface Peer {
   id: string
   send(message: ServerMessage): void
+  /** What this connection may do in the room. Missing means a plain editor. */
+  access?: RoomAccess | undefined
+  /** Ends the connection. Used when the same browser reconnects or the host ends the room. */
+  close?(): void
 }
 
 export interface RoomTiming {
@@ -45,8 +49,14 @@ export class Room {
   }
 
   join(peer: Peer) {
+    // A browser that reconnects before its old socket is noticed as dead replaces it, so it is never counted twice.
+    for (const existing of this.peers) {
+      if (existing.id !== peer.id) continue
+      this.peers.delete(existing)
+      existing.close?.()
+    }
     this.peers.add(peer)
-    peer.send({ type: 'state', board: this.board, version: this.version, now: Date.now(), peers: this.peers.size })
+    peer.send({ type: 'state', board: this.board, version: this.version, now: Date.now(), peers: this.peers.size, ...(peer.access ? { access: peer.access } : {}) })
     this.broadcast({ type: 'presence', peers: this.peers.size }, peer)
   }
 
@@ -159,28 +169,49 @@ export class Room {
 
 export class RoomManager {
   private readonly rooms = new Map<string, Room>()
-  private readonly loading = new Map<string, Promise<Room>>()
+  private readonly loading = new Map<string, Promise<Room | undefined>>()
   private readonly idleSince = new Map<string, number>()
 
-  constructor(private readonly files: SceneFiles, private readonly timing: RoomTiming = defaultTiming, private readonly maxScenes = 500) {}
+  constructor(private readonly files: SceneFiles, private readonly timing: RoomTiming = defaultTiming, private readonly maxScenes = 1000) {}
 
-  /** Opens a scene, creating it from the visitor's seed the first time. */
-  async open(id: string, seed: Board): Promise<Room> {
+  /**
+   * Opens a scene that already exists, or creates it from `seed` when it has
+   * no saved board yet. Whether a visitor may do either is decided before this
+   * is called (see RoomRegistry.decide); with no seed, a missing scene is not created.
+   */
+  async open(id: string, seed?: Board): Promise<Room | undefined> {
     sceneIdSchema.parse(id)
     const existing = this.rooms.get(id)
     if (existing) return existing
     const pending = this.loading.get(id)
     if (pending) return pending
-    const created = (async () => {
+    const created = (async (): Promise<Room | undefined> => {
       const stored = await this.files.load(id)
-      if (!stored && (await this.files.sceneCount()) >= this.maxScenes) throw new Error('This server has reached its scene limit.')
-      const room = new Room(id, stored?.board ?? seed, stored?.version ?? 0, this.files, this.timing)
+      const board = stored?.board ?? seed
+      if (!board) return undefined
+      // Rooms are made by RoomRegistry.create, which enforces the scene limit; this guards the legacy path.
+      if (!stored && !(await this.files.hasFolder(id)) && (await this.files.sceneCount()) >= this.maxScenes) throw new Error('This server has reached its scene limit.')
+      const room = new Room(id, board, stored?.version ?? 0, this.files, this.timing)
       if (!stored) await room.flush()
       this.rooms.set(id, room)
       return room
     })()
     this.loading.set(id, created)
     try { return await created } finally { this.loading.delete(id) }
+  }
+
+  /** Saves a room and forgets it, so the next visit reloads it from disk. Used when a room ends or is reopened. */
+  async drop(id: string) {
+    const room = this.rooms.get(id)
+    if (!room) return
+    await room.flush('Room closed')
+    this.rooms.delete(id)
+    this.idleSince.delete(id)
+  }
+
+  /** Whether a saved scene exists, in memory or on disk. */
+  async exists(id: string): Promise<boolean> {
+    return this.rooms.has(id) || (await this.files.load(id)) !== undefined
   }
 
   get(id: string): Room | undefined {

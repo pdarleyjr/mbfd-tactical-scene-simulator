@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Download, FileImage, FolderOpen, History, ImagePlus, Plus, RotateCcw, Trash2, Upload } from 'lucide-react'
 import { MAIN_SCENE_ID } from '@mbfd/domain'
 import { useUi } from '../../store/ui'
-import { deleteDeviceBoard, exportCurrentBoard, exportImage, importSceneFile, listDeviceBoards, listServerSnapshots, newScenarioFromImage, openAsSeparateScene, openDeviceBoard, restoreServerSnapshot, switchScenario, type ServerSnapshot } from '../../lib/workspace'
+import { deleteDeviceBoard, exportCurrentBoard, exportImage, importSceneFile, listDeviceBoards, listServerSnapshots, newScenarioFromImage, startOwnSimulation, openDeviceBoard, restoreServerSnapshot, switchScenario, type ServerSnapshot } from '../../lib/workspace'
 import { templates } from '../../templates'
 import { useBoard } from '../../store/board'
-import { goToScene, scenePath, useLive } from '../../lib/live'
+import { goToScene, useLive } from '../../lib/live'
+import { scenePath } from '../../lib/route'
 import { recentScenes } from '../../lib/recent'
 import type { BoardSummary } from '../../lib/storage'
 import { formatRelative } from '../../lib/format'
@@ -15,6 +16,7 @@ import { Button, IconButton, Modal } from '../primitives'
 export function LibraryDialog() {
   const close = useUi((state) => state.closeDialog)
   const sceneId = useLive((state) => state.sceneId)
+  const solo = useLive((state) => state.access?.kind === 'solo')
   const currentTemplateId = useBoard((state) => state.board.templateId)
   const [snapshots, setSnapshots] = useState<ServerSnapshot[] | null>(null)
   const [snapshotError, setSnapshotError] = useState('')
@@ -57,18 +59,18 @@ export function LibraryDialog() {
               <img className="scenario-card__thumb" src={template.thumbnailUrl} alt="" width={160} height={104} />
               <div className="scenario-card__meta">
                 <strong>{template.scenario.title}</strong>
-                <span>{current ? 'Showing now for everyone in this scene' : template.scenario.video ? 'With initial-conditions video' : 'Map only'}</span>
+                <span>{current ? (solo ? 'Showing now' : 'Showing now for everyone in this simulation') : template.scenario.video ? 'With initial-conditions video' : 'Map only'}</span>
               </div>
               {current
                 ? <span className="scenario-card__badge">Current</span>
-                : <Button tone="primary" onClick={() => { switchScenario(template.id); close() }} data-testid={`switch-to-${template.id}`}>Switch everyone</Button>}
+                : <Button tone="primary" onClick={() => { switchScenario(template.id); close() }} data-testid={`switch-to-${template.id}`}>{solo ? 'Switch' : 'Switch everyone'}</Button>}
             </li>
           )
         })}
       </ul>
 
       <div className="library__actions">
-        <Button tone="primary" icon={<Plus size={18} />} onClick={() => void run(() => openAsSeparateScene(), true)} data-testid="new-separate-scene">Start a separate scene</Button>
+        <Button tone="primary" icon={<Plus size={18} />} onClick={() => void run(() => startOwnSimulation(), true)} data-testid="new-separate-scene">Start a new simulation of my own</Button>
         <Button icon={<ImagePlus size={18} />} onClick={() => setCreating((value) => !value)} aria-expanded={creating}>New scenario from an image</Button>
         <Button icon={<Upload size={18} />} onClick={() => importRef.current?.click()} data-testid="import-scene">Import scene file</Button>
         <input ref={importRef} type="file" accept=".json,application/json" hidden data-testid="import-input" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void run(() => importSceneFile(file), true) }} />
@@ -94,11 +96,11 @@ export function LibraryDialog() {
         ))}
       </ul>
 
-      {(sceneId !== MAIN_SCENE_ID || recent.length > 0) && <h3 className="library__heading">Other scenes</h3>}
+      {(sceneId !== MAIN_SCENE_ID || recent.length > 0) && <h3 className="library__heading">Other simulations</h3>}
       <ul className="library__list library__list--compact" data-testid="recent-scenes">
         {sceneId !== MAIN_SCENE_ID && !recent.some((item) => item.id === MAIN_SCENE_ID) && (
           <li className="board-card board-card--compact">
-            <div className="board-card__meta"><strong>Main scene</strong><span>The shared scene at the site address</span></div>
+            <div className="board-card__meta"><strong>Main scene</strong><span>The original shared scene, now opened by its own link</span></div>
             <div className="board-card__actions"><Button onClick={() => goToScene(MAIN_SCENE_ID)}>Open</Button></div>
           </li>
         )}

@@ -1,10 +1,15 @@
 # Architecture (V3)
 
-## Decision: shared live scenes, no accounts
+## Decision: private by default, shared by invitation, no accounts
 
 V2 was a three-service system (Caddy, Fastify + Hocuspocus/Yjs, PostgreSQL) built so many participants could join rooms with roles, tokens, unit ownership, and a private Command 300 workspace. V3 removed all of that: no rooms to join, PINs, signed tokens, roles, unit logins, or database.
 
-What V3 keeps is the simplest form of collaboration: everyone who opens the same link works on the same scene. `/` is the main scene, `/s/<id>` a separate one, and `?view=present` a view-only classroom display of either. There is still nothing to sign in to.
+What V3 keeps is the simplest form of collaboration: everyone who opens the same link works on the same scene. Since V3.2 that is always a deliberate choice:
+
+- `/` is a start screen. **Start My Own Simulation** makes a private room; **Start a Shared Simulation** makes one anyone with its link can join; **Join with an invite** takes a link or code. A plain visit never opens a scene. (Before V3.2, `/` was one global scene every visitor was dropped into, and any `/s/<anything>` address created a scene on first visit; that is how people ended up working in each other's scenes.)
+- `/s/<id>` opens a simulation, `?view=present` makes the connection a view-only classroom display, enforced by the server.
+- There is still no sign-in. Access is a capability: the random 12-character id is the invitation, and the **host key** (returned once at creation, only its SHA-256 stored in `room.json`) proves ownership. A private (solo) room admits only its host key for editing; a shared room admits anyone with the id; both admit view-only displays. The site is not behind Cloudflare Access and has no Hub SSO today, so identity-based membership would be a new dependency; the capability model keeps the original no-login requirement.
+- Legacy scenes (a folder with no `room.json`) behave as before: joinable by link, never expired, no host. They cannot be created any more.
 
 Two parts:
 
@@ -13,7 +18,7 @@ Two parts:
 
 ### Live protocol (`packages/domain/src/sync.ts`)
 
-- A browser connects to `/sync/<sceneId>` and sends `hello` with a seed board. A scene that does not exist yet is created from the seed (the original scenario, or an imported board); otherwise the seed is ignored and the browser receives `state`.
+- A browser connects to `/sync/<sceneId>` and sends `hello` with a seed board, optionally the host key and `role: 'view'`. The server first decides access (`RoomRegistry.decide`): a scene that does not exist is refused (`not-found`), a private room refuses everyone but its host, a locked room refuses new guests, an ended room refuses everyone. The seed is only ever used by the host, to fill a room that has no board yet; otherwise it is ignored and the browser receives `state` (which now carries its `access`). Refusals carry a code (`not-found`, `forbidden`, `locked`, `ended`, `full`) and the browser stops retrying; `not-ready` (a guest arrived before the host opened the room) is retried quietly.
 - Changes travel as **patches**: `upserts` and `removes` of scene objects (merged per object, last write wins), an optional `order`, and whole replacements of `scenario`, `training`, `snapshots`, and `name`. While the clock records a run, only new timeline entries are sent (`runAppend`).
 - The client keeps a *shadow* of what the server has. Each local change is diffed against the shadow (`diffBoards`) and sent, batched to roughly 30 ms (90 ms during a drag, so others see the unit move). Remote patches are applied without being echoed back.
 - While disconnected, edits continue locally. On reconnect the server's state is loaded and the offline edits are re-applied on top, then sent.
