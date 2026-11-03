@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react'
-import { Circle, Group, Text } from 'react-konva'
+import { Circle, Group, Label, Tag, Text } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
-import type { HoseObject, MarkerObject, PathObject, SceneObject } from '@mbfd/domain'
-import { distance, findPort, findSnapTarget, pointAt, pointCount, type SnapTarget } from '@mbfd/fire-model'
+import type { HoseObject, MarkerObject, PathObject, PortDirection, SceneObject } from '@mbfd/domain'
+import { distance, eligiblePorts, findPort, findSnapTarget, pointAt, pointCount, type SnapTarget } from '@mbfd/fire-model'
 import { sceneContext, useBoard } from '../../store/board'
 import { useUi } from '../../store/ui'
+import { BODY_PX, SNAP_PX } from '../drafting'
 import { ink } from '../interaction'
+import { addBendAt, removeBend } from '../pathEdits'
 
 type ActiveDrag = { key: string; index: number; endpoint?: 'from' | 'to' | undefined }
 
@@ -17,13 +19,16 @@ function replacePoint(points: readonly number[], index: number, x: number, y: nu
 }
 
 /**
- * Vertex handles for the selected line: drag a point to reroute, drag a "+"
- * to add a bend, double-tap a bend to remove it, and drag an end onto a port
- * to connect (or away from one to disconnect).
+ * Handles for the selected line: drag a point to reroute, drag or tap a "+"
+ * to add a bend, tap a bend for its Remove button (or double-tap it), and drag
+ * an end onto a truck, hydrant, or wye to connect it (or away to disconnect).
+ * While an end is dragged every free coupling it fits is ringed, and it snaps
+ * when it gets close or lands anywhere on the truck's body.
  */
 export function PathHandles({ object, inv }: { object: PathObject; inv: number }) {
   const [active, setActive] = useState<ActiveDrag | null>(null)
   const [snap, setSnap] = useState<SnapTarget | null>(null)
+  const [picked, setPicked] = useState<number | null>(null)
   // The drop reads the latest snap from a ref; state may lag a fast release.
   const snapRef = useRef<SnapTarget | null>(null)
   if (object.locked) return null
@@ -34,7 +39,7 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
     useBoard.getState().setTransient((objects) => objects.map((candidate) => candidate.id === object.id ? mutator(candidate as PathObject) : candidate))
   }
 
-  function otherEndDirection(hose: HoseObject, end: 'from' | 'to') {
+  function otherEndDirection(hose: HoseObject, end: 'from' | 'to'): PortDirection | undefined {
     const reference = end === 'from' ? hose.to : hose.from
     if (!reference) return undefined
     const { board } = useBoard.getState()
@@ -49,7 +54,7 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
       const { board } = useBoard.getState()
       const hose = board.objects.find((candidate) => candidate.id === object.id) as HoseObject | undefined
       if (hose) {
-        found = findSnapTarget(board.objects, { hoseType: hose.hoseType, point: { x, y }, radius: 30 * inv, context: sceneContext(board.scenario), otherEndDirection: otherEndDirection(hose, endpoint), excludeHoseId: hose.id })
+        found = findSnapTarget(board.objects, { hoseType: hose.hoseType, point: { x, y }, radius: SNAP_PX * inv, context: sceneContext(board.scenario), otherEndDirection: otherEndDirection(hose, endpoint), excludeHoseId: hose.id, bodyMargin: BODY_PX * inv })
         if (found) { x = found.x; y = found.y; event.target.position({ x, y }) }
       }
     }
@@ -79,14 +84,12 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
     setActive(null)
   }
 
-  function removeVertex(index: number) {
-    if (count <= 2 || index === 0 || index === count - 1) return
-    useBoard.getState().commit((objects) => objects.map((candidate) => {
-      if (candidate.id !== object.id) return candidate
-      const points = [...(candidate as PathObject).points]
-      points.splice(index * 2, 2)
-      return { ...candidate, points } as SceneObject
-    }), 'Remove bend')
+  // Couplings the dragged end could connect to.
+  let targets: SnapTarget[] = []
+  if (isHose && active?.endpoint) {
+    const { board } = useBoard.getState()
+    const hose = object as HoseObject
+    targets = eligiblePorts(board.objects, { hoseType: hose.hoseType, context: sceneContext(board.scenario), otherEndDirection: otherEndDirection(hose, active.endpoint), excludeHoseId: hose.id })
   }
 
   const handles = []
@@ -102,19 +105,21 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
         key={key}
         x={point.x}
         y={point.y}
-        radius={(isEnd ? 9 : 7) * inv}
-        fill={connected ? ink.ok : isEnd ? '#f3f1ea' : ink.select}
+        radius={(isEnd ? 11 : 9) * inv}
+        fill={connected ? ink.ok : isEnd ? '#f3f1ea' : picked === index ? '#f3f1ea' : ink.select}
         stroke={ink.outline}
-        strokeWidth={2}
+        strokeWidth={2.5}
         strokeScaleEnabled={false}
-        hitStrokeWidth={18}
+        hitStrokeWidth={22}
         draggable
-        name="edit-handle"
-        onDragStart={() => { useBoard.getState().beginTransient(); setActive({ key, index, endpoint }) }}
+        name={isEnd ? 'edit-handle edit-handle--end' : 'edit-handle edit-handle--bend'}
+        onDragStart={() => { useBoard.getState().beginTransient(); setPicked(null); setActive({ key, index, endpoint }) }}
         onDragMove={(event) => vertexDragMove(index, endpoint, event)}
         onDragEnd={() => vertexDragEnd(endpoint)}
-        onDblClick={() => removeVertex(index)}
-        onDblTap={() => removeVertex(index)}
+        onClick={() => { if (!isEnd) setPicked(picked === index ? null : index) }}
+        onTap={() => { if (!isEnd) setPicked(picked === index ? null : index) }}
+        onDblClick={() => { setPicked(null); removeBend(object.id, index) }}
+        onDblTap={() => { setPicked(null); removeBend(object.id, index) }}
       />,
     )
   }
@@ -123,7 +128,7 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
     if (active && active.key !== key) continue
     const a = pointAt(object.points, segment)
     const b = pointAt(object.points, segment + 1)
-    if (!active && distance(a, b) / inv < 34) continue
+    if (!active && distance(a, b) / inv < 48) continue
     const position = active?.key === key ? pointAt(object.points, active.index) : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
     handles.push(
       <Group
@@ -131,10 +136,13 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
         x={position.x}
         y={position.y}
         draggable
-        name="edit-handle"
+        name="edit-handle edit-handle--add"
+        onClick={() => { setPicked(null); addBendAt(object.id, segment) }}
+        onTap={() => { setPicked(null); addBendAt(object.id, segment) }}
         onDragStart={(event) => {
           const store = useBoard.getState()
           store.beginTransient()
+          setPicked(null)
           const { x, y } = event.target.position()
           update((target) => {
             const points = [...target.points]
@@ -149,15 +157,31 @@ export function PathHandles({ object, inv }: { object: PathObject; inv: number }
         }}
         onDragEnd={() => { useBoard.getState().endTransient('Add bend'); setActive(null) }}
       >
-        <Circle radius={6 * inv} fill="rgba(11,16,19,0.75)" stroke={ink.select} strokeWidth={1.5} strokeScaleEnabled={false} hitStrokeWidth={16} />
-        <Text x={-5 * inv} y={-6 * inv} width={10 * inv} align="center" text="+" fontSize={12 * inv} fontStyle="bold" fill={ink.select} listening={false} />
+        <Circle radius={8.5 * inv} fill="rgba(11,16,19,0.85)" stroke={ink.select} strokeWidth={2} strokeScaleEnabled={false} hitStrokeWidth={20} />
+        <Text x={-6 * inv} y={-7.5 * inv} width={12 * inv} align="center" text="+" fontSize={15 * inv} fontStyle="bold" fill={ink.select} listening={false} />
       </Group>,
     )
   }
+  const pickedPoint = picked !== null && picked > 0 && picked < count - 1 && !active ? pointAt(object.points, picked) : undefined
   return (
     <Group>
+      {targets.map((target) => <Circle key={`${target.objectId}:${target.portId}`} x={target.x} y={target.y} radius={12 * inv} stroke={ink.ok} strokeWidth={2.5} dash={[5, 3]} strokeScaleEnabled={false} fill="rgba(76,195,138,0.22)" listening={false} name="connect-target" />)}
       {handles}
-      {snap && <Circle x={snap.x} y={snap.y} radius={16 * inv} stroke={ink.ok} strokeWidth={3} strokeScaleEnabled={false} fill="rgba(76,195,138,0.25)" listening={false} />}
+      {snap && <Circle x={snap.x} y={snap.y} radius={20 * inv} stroke={ink.ok} strokeWidth={3.5} strokeScaleEnabled={false} fill="rgba(76,195,138,0.3)" listening={false} name="snap-ring" />}
+      {pickedPoint && (
+        <Label
+          x={pickedPoint.x + 16 * inv}
+          y={pickedPoint.y - 16 * inv}
+          scaleX={inv}
+          scaleY={inv}
+          name="remove-bend"
+          onClick={() => { const index = picked!; setPicked(null); removeBend(object.id, index) }}
+          onTap={() => { const index = picked!; setPicked(null); removeBend(object.id, index) }}
+        >
+          <Tag fill="#0b1013" stroke={ink.danger} strokeWidth={2} cornerRadius={6} pointerDirection="left" pointerWidth={10} pointerHeight={8} hitStrokeWidth={12} />
+          <Text text="✕ Remove point" fontFamily="Barlow" fontStyle="700" fontSize={15} padding={9} fill="#ffffff" />
+        </Label>
+      )}
     </Group>
   )
 }
@@ -169,11 +193,12 @@ export function RadiusHandle({ object, inv }: { object: MarkerObject; inv: numbe
     <Circle
       x={object.x + object.radius}
       y={object.y}
-      radius={8 * inv}
+      radius={10 * inv}
       fill="#f3f1ea"
       stroke={ink.outline}
       strokeWidth={2}
       strokeScaleEnabled={false}
+      hitStrokeWidth={18}
       draggable
       name="edit-handle"
       onDragStart={() => useBoard.getState().beginTransient()}

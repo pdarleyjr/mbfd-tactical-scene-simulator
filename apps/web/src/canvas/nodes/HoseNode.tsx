@@ -1,22 +1,25 @@
 import { memo, useContext, useEffect, useRef } from 'react'
-import { Circle, Group, Label, Line, Tag, Text } from 'react-konva'
+import { Circle, Group, Line } from 'react-konva'
 import type Konva from 'konva'
 import { hoseCatalog, type HoseObject } from '@mbfd/domain'
-import { labelAnchor, type HoseReading, type LineState } from '@mbfd/fire-model'
+import type { HoseReading, LineState } from '@mbfd/fire-model'
 import { FlowContext, ink, useInteraction } from '../interaction'
 
 interface Props {
   hose: HoseObject
+  /** Part of the props so the line redraws when its reading changes (calibration, loads). */
   reading: HoseReading
   state: LineState
   selected: boolean
   inv: number
-  showLength: boolean
   showFlow: boolean
+  /** Stroke multiplier: 1.6 on 4K panels at 100% scaling, so lines keep their weight next to the enlarged chrome. */
+  lineScale?: number
   dimmed?: boolean
 }
 
-export const HoseNode = memo(function HoseNode({ hose, reading, state, selected, inv, showLength, showFlow, dimmed }: Props) {
+/** One hose line. Its length label is drawn by HoseLengthLabels, which keeps labels clear of each other. */
+export const HoseNode = memo(function HoseNode({ hose, state, selected, inv, showFlow, dimmed, lineScale = 1 }: Props) {
   const definition = hoseCatalog[hose.hoseType]
   const interaction = useInteraction()
   const flow = useContext(FlowContext)
@@ -27,12 +30,9 @@ export const HoseNode = memo(function HoseNode({ hose, reading, state, selected,
     return flow.register(flowRef.current)
   }, [animated, flow])
 
-  const width = definition.width
+  const width = definition.width * lineScale
   const points = hose.points
   const last = points.length - 2
-  const anchor = labelAnchor(points)
-  const over = reading.overLoadFt !== undefined
-  const lengthText = `${definition.shortLabel} · ${reading.length.text}${reading.sections ? ` · ${reading.sections} sec` : ''}`
   return (
     <Group id={hose.id} name="scene-object hose" opacity={dimmed ? 0.35 : 1} onPointerDown={(event) => interaction.pick(hose.id, event)}>
       {selected && <Line points={points} stroke={ink.select} strokeWidth={width + 10} lineCap="round" lineJoin="round" strokeScaleEnabled={false} opacity={0.45} listening={false} />}
@@ -44,7 +44,7 @@ export const HoseNode = memo(function HoseNode({ hose, reading, state, selected,
         lineCap="round"
         lineJoin="round"
         strokeScaleEnabled={false}
-        hitStrokeWidth={24}
+        hitStrokeWidth={28}
         perfectDrawEnabled={false}
         listening={interaction.interactive}
       />
@@ -61,14 +61,8 @@ export const HoseNode = memo(function HoseNode({ hose, reading, state, selected,
           perfectDrawEnabled={false}
         />
       )}
-      <Coupling x={points[0]!} y={points[1]!} connected={Boolean(hose.from)} color={definition.color} inv={inv} />
-      <Coupling x={points[last]!} y={points[last + 1]!} connected={Boolean(hose.to)} color={definition.color} inv={inv} />
-      {showLength && (
-        <Label x={anchor.x} y={anchor.y} rotation={anchor.angle} scaleX={inv} scaleY={inv} listening={false}>
-          <Tag fill={over ? '#3a2606' : 'rgba(11,16,19,0.86)'} stroke={over ? ink.warning : definition.color} strokeWidth={1} cornerRadius={4} pointerDirection="down" pointerWidth={8} pointerHeight={5} />
-          <Text text={over ? `${lengthText} · over load` : lengthText} fontFamily="Barlow" fontStyle="600" fontSize={12} padding={4} fill={over ? ink.warning : reading.length.calibrated ? ink.labelText : '#e8d9b5'} />
-        </Label>
-      )}
+      <Coupling x={points[0]!} y={points[1]!} connected={Boolean(hose.from)} color={definition.color} inv={inv * lineScale} />
+      <Coupling x={points[last]!} y={points[last + 1]!} connected={Boolean(hose.to)} color={definition.color} inv={inv * lineScale} />
     </Group>
   )
 })

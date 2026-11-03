@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Group, Image, Layer, Line, Rect, Stage, Transformer } from 'react-konva'
 import Konva from 'konva'
-import { apparatusCatalog, findMarker, isPathObject, type HoseObject, type MarkerObject, type MeasurementObject, type SceneObject } from '@mbfd/domain'
+import { apparatusCatalog, findMarker, hoseCatalog, isPathObject, type ApparatusObject, type HoseObject, type MarkerObject, type MeasurementObject, type SceneObject } from '@mbfd/domain'
 import {
   apparatusSize,
   boundsOfPoints,
@@ -23,7 +23,7 @@ import { useMediaUrl } from '../lib/session'
 import { canvasApi } from './api'
 import { draftStroke, draftTap, placeApparatusAt, placeAt } from './drafting'
 import { preloadImage, useHtmlImage } from './images'
-import { FlowContext, InteractionContext, ink, type NodeInteraction } from './interaction'
+import { FlowContext, InteractionContext, ink, verticalExtent, type NodeInteraction } from './interaction'
 import { fitWorldToViewport, pinchViewport, preserveCenterOnResize, screenToWorld, zoomAroundPoint, type ViewportTransform } from './viewport'
 import { ApparatusNode } from './nodes/ApparatusNode'
 import { ApparatusLabel } from './nodes/ApparatusLabel'
@@ -32,10 +32,19 @@ import { ArrowNode, HydrantNode, MarkerNode, MeasurementNode, NoteNode, NozzleNo
 import { PathHandles, RadiusHandle } from './overlays/EditHandles'
 import { DraftOverlay } from './overlays/DraftOverlay'
 import { EffectsLayer } from './nodes/EffectsLayer'
+import { HoseLengthLabels, type HoseLabelView } from './nodes/HoseLabels'
 import { effectBounds } from './effects'
+import { hoseLabelText, layoutLineLabels, lengthLabelFontPx, type ScreenRect } from './labels'
 
 Konva.dragDistance = 5
 Konva.hitOnDragEnabled = false
+// Only the primary button drags a unit. Konva's default also drags with the
+// middle button, which here pans the map, so a middle-drag used to move the
+// truck under the pointer and the map at the same time.
+Konva.dragButtons = [0]
+
+/** Pointer travel before a press on a unit becomes a move: a fingertip or pen wobbles more than a mouse. */
+const DRAG_START_PX = { mouse: 4, touch: 10, pen: 8 } as const
 
 for (const template of apparatusCatalog) preloadImage(template.assetPath)
 
@@ -72,6 +81,96 @@ function objectCenter(object: SceneObject): Vec {
 
 function prefersReducedMotion() {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+/** Re-renders once web fonts are in, so label pills are measured with Barlow, not the fallback. */
+function useFontsReady() {
+  const [ready, setReady] = useState(() => typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded')
+  useEffect(() => {
+    if (ready || typeof document === 'undefined' || !document.fonts) return
+    let live = true
+    void document.fonts.ready.then(() => { if (live) setReady(true) })
+    return () => { live = false }
+  }, [ready])
+  return ready
+}
+
+/**
+ * Where hose labels should not go, in screen pixels at the current zoom:
+ * each vehicle's footprint and, when shown, its unit label below it.
+ */
+function labelObstacles(units: readonly ApparatusObject[], sizeOf: (templateId: string, modelId?: string) => ApparatusSize, scale: number, unitLabels: boolean, unitLabelScale: number): ScreenRect[] {
+  const rects: ScreenRect[] = []
+  for (const unit of units) {
+    const size = sizeOf(unit.templateId, unit.modelId)
+    const radians = unit.rotation * Math.PI / 180
+    const halfX = (Math.abs(size.width / 2 * Math.cos(radians)) + Math.abs(size.length / 2 * Math.sin(radians))) * scale
+    const halfY = verticalExtent(size, unit.rotation) * scale
+    rects.push({ x: unit.x * scale - halfX, y: unit.y * scale - halfY, width: halfX * 2, height: halfY * 2 })
+    if (unitLabels) {
+      const width = (unit.label.length * 14 * 0.62 + 10) * unitLabelScale
+      const height = (unit.assignment ? 44 : 26) * unitLabelScale
+      rects.push({ x: unit.x * scale - width / 2, y: unit.y * scale + halfY + 4, width, height })
+    }
+  }
+  return rects
+}
+
+/** True on touch-first screens (phones, tablets, smartboards), where handles need to be bigger. */
+function useCoarsePointer() {
+  const query = '(pointer: coarse)'
+  const [coarse, setCoarse] = useState(() => typeof matchMedia === 'function' && matchMedia(query).matches)
+  useEffect(() => {
+    if (typeof matchMedia !== 'function') return
+    const list = matchMedia(query)
+    const onChange = () => setCoarse(list.matches)
+    list.addEventListener('change', onChange)
+    return () => list.removeEventListener('change', onChange)
+  }, [])
+  return coarse
+}
+
+/**
+ * The rotate handle: a filled blue disc with a turning arrow, so it reads as
+ * "rotate" and never looks like the resize squares. The other anchors are
+ * white with a blue edge.
+ */
+function styleAnchor(anchor: Konva.Rect) {
+  anchor.hitStrokeWidth(18)
+  if (!anchor.hasName('rotater')) return
+  const size = anchor.width() * 1.25
+  anchor.setAttrs({ width: size, height: size, offsetX: size / 2, offsetY: size / 2, fill: ink.select, stroke: '#f3f1ea', strokeWidth: 2 })
+  anchor.sceneFunc((context, shape) => {
+    const r = shape.width() / 2
+    context.beginPath()
+    context.arc(r, r, r, 0, Math.PI * 2)
+    context.closePath()
+    context.fillStrokeShape(shape)
+    // A three-quarter arrow around the middle.
+    const arrow = r * 0.5
+    context.beginPath()
+    context.arc(r, r, arrow, -Math.PI * 0.95, Math.PI * 0.55)
+    context.strokeStyle = '#0b1013'
+    context.lineWidth = Math.max(2, r * 0.22)
+    context.lineCap = 'round'
+    context.stroke()
+    const tipAngle = Math.PI * 0.55
+    const tipX = r + Math.cos(tipAngle) * arrow
+    const tipY = r + Math.sin(tipAngle) * arrow
+    context.beginPath()
+    context.moveTo(tipX - r * 0.36, tipY + r * 0.02)
+    context.lineTo(tipX + r * 0.04, tipY + r * 0.06)
+    context.lineTo(tipX - r * 0.08, tipY - r * 0.34)
+    context.stroke()
+  })
+  // Hit area: the whole disc plus its generous hit stroke, without the arrow's own paint.
+  anchor.hitFunc((context, shape) => {
+    const r = shape.width() / 2
+    context.beginPath()
+    context.arc(r, r, r, 0, Math.PI * 2)
+    context.closePath()
+    context.fillStrokeShape(shape)
+  })
 }
 
 export function SceneStage() {
@@ -126,13 +225,42 @@ export function SceneStage() {
     const cache = new WeakMap<SceneObject, LengthReading>()
     return (object: MeasurementObject) => cache.get(object) ?? cache.set(object, readLength(polylineLength(object.points), scenario.calibration)).get(object)!
   }, [scenario.calibration])
-  const interactive = tool === 'select' && !reviewing && !display && !spaceDown
+  const fireOnly = tool === 'fire'
+  const interactive = (tool === 'select' || fireOnly) && !reviewing && !display && !spaceDown
   const inv = 1 / view.scale
   const roundedInv = Math.round(inv * 1000) / 1000
   // Matches the CSS chrome zoom on very large displays running at 100% scaling.
-  const labelScale = (presenting ? 1.35 : 1) * (size.width >= 2600 ? 1.6 : 1)
+  const chromeScale = size.width >= 2600 ? 1.6 : 1
+  const labelScale = (presenting ? 1.35 : 1) * chromeScale
+  const lengthFontPx = lengthLabelFontPx(size.width, presenting)
+  const coarsePointer = useCoarsePointer()
+  // Handles a finger can find on a phone and a pen can find across an 86″ panel.
+  const anchorPx = Math.round((coarsePointer ? 30 : 24) * chromeScale)
   const selected = useMemo(() => new Set(selection), [selection])
   const compareObjects = useMemo(() => compareSnapshotId ? board.snapshots.find((snapshot) => snapshot.id === compareSnapshotId)?.objects : undefined, [compareSnapshotId, board.snapshots])
+  const fontsReady = useFontsReady()
+
+  // Hose length labels: screen-sized pills placed clear of each other and of the units.
+  const hoseLabels = useMemo<HoseLabelView[]>(() => {
+    if (!layers.hoseLengths || size.width === 0) return []
+    const lines = objects.filter((object): object is HoseObject => object.type === 'hose')
+    if (!lines.length) return []
+    const units = objects.filter((object): object is ApparatusObject => object.type === 'apparatus')
+    const texts = new Map(lines.map((hose) => [hose.id, hoseLabelText(hose, hoseReading(hose))]))
+    const placed = layoutLineLabels(
+      lines.map((hose) => ({ id: hose.id, points: hose.points, text: texts.get(hose.id)!, lineWidthPx: hoseCatalog[hose.hoseType].width * chromeScale })),
+      view.scale,
+      lengthFontPx,
+      labelObstacles(units, sizeFor, view.scale, layers.labels, labelScale),
+    )
+    const byId = new Map(lines.map((hose) => [hose.id, hose]))
+    return placed.map((label) => {
+      const hose = byId.get(label.id)!
+      const reading = hoseReading(hose)
+      return { ...label, text: texts.get(label.id)!, color: hoseCatalog[hose.hoseType].color, tone: reading.overLoadFt !== undefined ? 'over' : reading.length.calibrated ? 'normal' : 'uncalibrated', selected: selected.has(hose.id) }
+    })
+    // fontsReady re-measures the pills once Barlow has loaded.
+  }, [objects, view.scale, lengthFontPx, layers.hoseLengths, layers.labels, labelScale, chromeScale, hoseReading, sizeFor, selected, size.width, fontsReady]) // oxlint-disable-line react-hooks/exhaustive-deps
 
   const fit = useCallback(() => {
     const current = sizeRef.current
@@ -284,7 +412,7 @@ export function SceneStage() {
   // clickable again (e.g. switching back to Select) so the first tap lands.
   useLayoutEffect(() => {
     stageRef.current?.getLayers().forEach((layer) => layer.draw())
-  }, [interactive])
+  }, [interactive, fireOnly])
 
   // Keep the rotate handle attached to the selected vehicles and appliances.
   const rotatableIds = useMemo(() => objects.filter((object) => selected.has(object.id) && (ROTATABLE.has(object.type) || isEffect(object)) && !object.locked).map((object) => object.id), [objects, selected])
@@ -325,9 +453,14 @@ export function SceneStage() {
 
   const interaction = useMemo<NodeInteraction>(() => ({
     interactive,
+    fireOnly,
     pick(id, event) {
       if (!interactive) return
       event.cancelBubble = true
+      // A tap that wobbles a few pixels selects the unit; it never nudges it.
+      const pointerType = (event.evt as PointerEvent).pointerType as keyof typeof DRAG_START_PX | undefined
+      const target = event.currentTarget as Konva.Node | undefined
+      if (target && typeof target.dragDistance === 'function') target.dragDistance(DRAG_START_PX[pointerType ?? 'mouse'] ?? DRAG_START_PX.mouse)
       const ui = useUi.getState()
       if (event.evt.shiftKey) ui.toggleSelected(id)
       else if (!ui.selection.includes(id)) ui.select([id])
@@ -368,7 +501,7 @@ export function SceneStage() {
       useBoard.getState().endTransient(active.originals.size > 1 ? `Move ${active.originals.size} objects` : 'Move')
       drag.current = null
     },
-  }), [interactive])
+  }), [interactive, fireOnly])
 
   function cancelNodeDrags() {
     // Clear the drag first: stopDrag() fires dragend, which must not commit.
@@ -519,7 +652,7 @@ export function SceneStage() {
 
   const selectedSingle = selection.length === 1 ? objects.find((object) => object.id === selection[0]) : undefined
   const effectFrame = isEffect(selectedSingle) && !selectedSingle.locked && rotatableIds.length === 1
-  const cursorStyle = spaceDown ? 'grab' : reviewing ? 'grab' : tool === 'select' ? 'default' : tool === 'apparatus' || tool === 'hydrant' || tool === 'marker' || tool === 'note' ? 'copy' : 'crosshair'
+  const cursorStyle = spaceDown ? 'grab' : reviewing ? 'grab' : tool === 'select' ? 'default' : tool === 'apparatus' || tool === 'fire' || tool === 'hydrant' || tool === 'marker' || tool === 'note' ? 'copy' : 'crosshair'
   const strokePoints = strokePreview.current
 
   const apparatus: SceneObject[] = []
@@ -560,13 +693,13 @@ export function SceneStage() {
           </Layer>
           {layers.markers && effects.length > 0 && <EffectsLayer effects={effects} />}
           <InteractionContext.Provider value={interaction}>
-            <Layer listening={interactive}>
+            <Layer listening={interactive && !fireOnly}>
               {apparatus.map((object) => object.type === 'apparatus' && (
                 <ApparatusNode key={object.id} object={object} size={sizeFor(object.templateId, object.modelId)} selected={selected.has(object.id)} inv={roundedInv} />
               ))}
             </Layer>
             <FlowContext.Provider value={flowRegistry}>
-              <Layer ref={hoseLayerRef} listening={interactive}>
+              <Layer ref={hoseLayerRef} listening={interactive && !fireOnly}>
                 {hoses.map((object) => object.type === 'hose' && (
                   <HoseNode
                     key={object.id}
@@ -575,8 +708,8 @@ export function SceneStage() {
                     state={supply.lines.get(object.id) ?? 'dry'}
                     selected={selected.has(object.id)}
                     inv={roundedInv}
-                    showLength={layers.hoseLengths}
                     showFlow={layers.flow}
+                    lineScale={chromeScale}
                   />
                 ))}
               </Layer>
@@ -591,15 +724,16 @@ export function SceneStage() {
                   case 'marker': return layers.markers ? <MarkerNode key={object.id} object={object} selected={isSelected} inv={roundedInv} feetPerUnit={scenario.calibration?.feetPerWorldUnit} /> : null
                   case 'note': return layers.markers ? <NoteNode key={object.id} object={object} selected={isSelected} inv={roundedInv} /> : null
                   case 'arrow': return layers.markers ? <ArrowNode key={object.id} object={object} selected={isSelected} inv={roundedInv} /> : null
-                  case 'measurement': return <MeasurementNode key={object.id} object={object} selected={isSelected} inv={roundedInv} reading={lengthReading(object)} />
+                  case 'measurement': return <MeasurementNode key={object.id} object={object} selected={isSelected} inv={roundedInv} reading={lengthReading(object)} fontPx={lengthFontPx} />
                   default: return null
                 }
               })}
             </Layer>
           </InteractionContext.Provider>
-          {layers.labels && (
+          {(layers.labels || hoseLabels.length > 0) && (
             <Layer listening={false}>
-              {apparatus.map((object) => {
+              {hoseLabels.length > 0 && <HoseLengthLabels labels={hoseLabels} inv={roundedInv} />}
+              {layers.labels && apparatus.map((object) => {
                 if (object.type !== 'apparatus') return null
                 const unit = supply.apparatus.get(object.id)
                 const state = unit?.supplied ? 'hydrant' : unit?.outputLineIds.length ? 'tank' : 'none'
@@ -609,7 +743,7 @@ export function SceneStage() {
           )}
           <Layer ref={overlayRef}>
             {compareObjects && <CompareGhost objects={compareObjects} inv={roundedInv} context={context} />}
-            {interactive && selectedSingle && isPathObject(selectedSingle) && <PathHandles object={selectedSingle} inv={roundedInv} />}
+            {interactive && !fireOnly && selectedSingle && isPathObject(selectedSingle) && <PathHandles key={selectedSingle.id} object={selectedSingle} inv={roundedInv} />}
             {interactive && selectedSingle?.type === 'marker' && !isEffect(selectedSingle) && <RadiusHandle object={selectedSingle} inv={roundedInv} />}
             <Transformer
               ref={transformerRef}
@@ -619,16 +753,18 @@ export function SceneStage() {
               boundBoxFunc={(previous, next) => (effectFrame && (Math.abs(next.width) < 12 || Math.abs(next.height) < 12) ? previous : next)}
               rotateEnabled
               rotationSnaps={shiftDown ? [] : rotationSnaps}
-              rotationSnapTolerance={6}
-              rotateAnchorOffset={effectFrame ? 54 : 26}
-              anchorSize={effectFrame ? 18 : 22}
-              anchorCornerRadius={11}
+              // Snaps only right next to 0°, 15°, 30°…, so a unit lines up with any street.
+              rotationSnapTolerance={3}
+              rotateAnchorOffset={Math.round(anchorPx * (effectFrame ? 2.2 : 1.45))}
+              anchorSize={effectFrame ? Math.round(anchorPx * 0.8) : anchorPx}
+              anchorCornerRadius={anchorPx / 2}
+              anchorStyleFunc={styleAnchor}
               anchorFill="#f3f1ea"
               anchorStroke={ink.select}
               anchorStrokeWidth={2}
               borderStroke={ink.select}
               borderDash={[6, 4]}
-              borderStrokeWidth={1.5}
+              borderStrokeWidth={2}
               padding={effectFrame ? 12 : 5}
               flipEnabled={false}
               ignoreStroke
@@ -644,7 +780,7 @@ export function SceneStage() {
                 }
               }}
             />
-            {!reviewing && <DraftOverlay inv={roundedInv} />}
+            {!reviewing && <DraftOverlay inv={roundedInv} fontPx={lengthFontPx} />}
             {strokePoints && strokePoints.length >= 4 && <Line points={strokePoints} stroke="#f3f1ea" strokeWidth={3} dash={[6, 5]} lineCap="round" lineJoin="round" strokeScaleEnabled={false} listening={false} />}
             {marquee && (
               <Rect

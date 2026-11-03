@@ -4,8 +4,10 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import type { ApparatusSize } from '@mbfd/fire-model'
 
 export interface NodeInteraction {
-  /** Objects respond to pointer input (select tool, not reviewing). */
+  /** Objects respond to pointer input (select or fire tool, not reviewing). */
   interactive: boolean
+  /** The Fire tool is on: only flames and smoke can be picked up; everything else lets taps through to the map. */
+  fireOnly: boolean
   pick(id: string, event: KonvaEventObject<MouseEvent | TouchEvent | PointerEvent>): void
   dragStart(id: string, event: KonvaEventObject<DragEvent>): void
   dragMove(id: string, event: KonvaEventObject<DragEvent>): void
@@ -14,7 +16,7 @@ export interface NodeInteraction {
 
 const noop = () => undefined
 
-export const InteractionContext = createContext<NodeInteraction>({ interactive: false, pick: noop, dragStart: noop, dragMove: noop, dragEnd: noop })
+export const InteractionContext = createContext<NodeInteraction>({ interactive: false, fireOnly: false, pick: noop, dragStart: noop, dragMove: noop, dragEnd: noop })
 
 export function useInteraction() {
   return useContext(InteractionContext)

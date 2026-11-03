@@ -273,6 +273,21 @@ textarea.input { resize: vertical; line-height: 1.4; }
 .marker-option__badge--flame { background: radial-gradient(circle at 50% 78%, #fff6c4 0 14%, #ffc23a 30%, #f26a12 56%, #b5230c 80%); }
 .marker-option__badge--smoke { background: radial-gradient(circle at 38% 62%, #2c2d2f 0 22%, #6d7275 52%, #a7adb0 82%); }
 
+/* Fire tray: what to put down, how big, and saved fire layouts. */
+.tray__row--stack { flex-direction: column; align-items: stretch; gap: 6px; }
+.tray__row--stack .segmented { display: flex; }
+.tray__row--stack .segmented button { flex: 1; min-height: 42px; }
+.layout-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.layout-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px; padding: 4px 4px 4px 6px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--surface-2); }
+.layout-row.is-showing { border-color: rgba(76, 195, 138, 0.55); }
+.layout-row .input { min-height: 38px; background: transparent; border-color: transparent; font-weight: 600; }
+.layout-row .input:hover { border-color: var(--line); }
+.layout-row .btn { min-height: 38px; }
+.layout-row__count { min-width: 26px; padding: 2px 6px; border-radius: 999px; background: var(--surface-3); text-align: center; font-family: var(--display); font-weight: 700; font-size: 12.5px; color: var(--tan); font-variant-numeric: tabular-nums; }
+.layout-row__badge { padding: 0 8px; font-family: var(--display); font-weight: 700; font-size: 12.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--green); }
+.layout-save { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.layout-save .btn { min-height: 42px; }
+
 .swatches { display: flex; gap: 10px; }
 .swatches button { width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--surface-solid); box-shadow: 0 0 0 1px var(--line-strong); }
 .swatches button.is-active { box-shadow: 0 0 0 3px var(--blue); }
@@ -435,8 +450,9 @@ textarea.input { resize: vertical; line-height: 1.4; }
 .banner--info { border-color: var(--blue); }
 
 .toasts { position: fixed; left: 50%; bottom: calc(92px + var(--safe-bottom)); transform: translateX(-50%); z-index: 30; display: grid; gap: 6px; justify-items: center; pointer-events: none; }
+/* A toast never swallows a tap meant for the map under it; only its buttons take clicks. */
 .toast {
-  pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px)); padding: 9px 8px 9px 14px;
+  pointer-events: none; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px)); padding: 9px 8px 9px 14px;
   background: var(--surface-solid); border: 1px solid var(--line-strong); border-left-width: 4px; border-radius: var(--radius-sm); box-shadow: var(--shadow); font-size: 14px;
   animation: rise 200ms ease-out;
 }
@@ -444,6 +460,7 @@ textarea.input { resize: vertical; line-height: 1.4; }
 .toast--warning { border-left-color: var(--amber); }
 .toast--error { border-left-color: var(--red-strong); }
 .toast--info { border-left-color: var(--blue); }
+.toast button { pointer-events: auto; }
 .toast__action { border: 0; background: transparent; color: var(--blue); font-weight: 700; padding: 4px 8px; }
 .toast__close { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--text-3); }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }

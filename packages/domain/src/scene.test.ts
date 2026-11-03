@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { apparatusCatalog, apparatusModels, defaultHoseLoads, legacyHoseLoads, findApparatusTemplate, findMarker } from './catalog.js'
 import {
+  MAX_FIRE_LAYOUTS,
   SCENE_SCHEMA_VERSION,
   boardSchema,
+  fireLayoutSchema,
+  scenarioSchema,
   exportFileSchema,
   isPathObject,
   isPlacedObject,
@@ -214,6 +217,39 @@ describe('repairBoard', () => {
   it('returns undefined for non-objects', () => {
     expect(repairBoard(42, fallback)).toBeUndefined()
     expect(repairBoard(null, fallback)).toBeUndefined()
+  })
+
+  it('keeps readable fire layouts and drops only the damaged ones', () => {
+    const flame = { id: 'f1', type: 'marker', markerType: 'flames', x: 10, y: 20, radius: 12 }
+    const raw = minimalBoard({
+      scenario: {
+        title: 'Collins Ave',
+        background: { kind: 'builtin', url: '/scenario-assets/seed/background.webp' },
+        world: { width: 1600, height: 1000 },
+        fireLayouts: [{ id: 'a', name: 'Garage fire', effects: [flame] }, { id: 'b', name: '', effects: [] }],
+        hoseLoads: { sectionLengthFt: { attack175: -1 } },
+      },
+    })
+    const result = repairBoard(raw, fallback)!
+    expect(result.repaired).toBe(true)
+    expect(result.board.scenario.fireLayouts?.map((layout) => layout.name)).toEqual(['Garage fire'])
+    expect(result.board.scenario.fireLayouts?.[0]?.effects[0]).toMatchObject({ markerType: 'flames', rotation: 0, locked: false })
+  })
+})
+
+describe('fire layouts', () => {
+  it('are optional, so boards saved before them still load', () => {
+    expect(boardSchema.parse(minimalBoard()).scenario.fireLayouts).toBeUndefined()
+  })
+
+  it('validate their name, size and contents', () => {
+    const scenario = { title: 'S', background: { kind: 'builtin', url: '/x.webp' }, world: { width: 10, height: 10 } }
+    const effect = { id: 'f', type: 'marker', markerType: 'smoke', x: 1, y: 1 }
+    expect(scenarioSchema.safeParse({ ...scenario, fireLayouts: [{ id: 'a', name: 'Kitchen', effects: [effect] }] }).success).toBe(true)
+    expect(fireLayoutSchema.safeParse({ id: 'a', name: '  ', effects: [] }).success).toBe(false)
+    expect(fireLayoutSchema.safeParse({ id: 'a', name: 'x', effects: [{ ...effect, type: 'hydrant' }] }).success).toBe(false)
+    const many = Array.from({ length: MAX_FIRE_LAYOUTS + 1 }, (_value, index) => ({ id: `l${index}`, name: `L${index}`, effects: [] }))
+    expect(scenarioSchema.safeParse({ ...scenario, fireLayouts: many }).success).toBe(false)
   })
 })
 

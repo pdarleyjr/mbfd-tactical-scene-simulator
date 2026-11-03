@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { ApparatusObject, HoseObject, HydrantObject, NozzleObject, PortDefinition, SceneObject } from '@mbfd/domain'
-import { canAttach, eligiblePorts, findSnapTarget, occupiedPorts, portKey, reconcileHose, reconcileHoses } from './connections.js'
+import type { ApparatusObject, HoseObject, HydrantObject, MarkerObject, NozzleObject, PortDefinition, SceneObject } from '@mbfd/domain'
+import { canAttach, eligiblePorts, findMarkerSnap, findSnapTarget, occupiedPorts, portKey, reconcileHose, reconcileHoses } from './connections.js'
 import { findPort, portWorldPosition } from './ports.js'
 
 function hydrant(id: string, x: number, y: number): HydrantObject {
@@ -200,5 +200,17 @@ describe('findSnapTarget body taps', () => {
   it('ignores body taps unless asked, and on trucks without a pump', () => {
     expect(findSnapTarget([engine], { hoseType: 'supply5', point: { x: 500, y: 500 }, radius: 1 })).toBeUndefined()
     expect(findSnapTarget([rescue], { hoseType: 'supply5', point: { x: 700, y: 500 }, radius: 1, bodyMargin: 2 })).toBeUndefined()
+  })
+})
+
+describe('findMarkerSnap', () => {
+  const marker = (id: string, markerType: MarkerObject['markerType'], x: number, y: number): MarkerObject => ({ id, type: 'marker', markerType, label: '', x, y, rotation: 0, locked: false })
+
+  it('finds the nearest entry point within reach and ignores other markers', () => {
+    const objects: SceneObject[] = [marker('cp', 'command-post', 100, 100), marker('door-a', 'entry', 110, 100), marker('door-b', 'entry', 104, 100), hydrant('h1', 100, 100)]
+    expect(findMarkerSnap(objects, { x: 100, y: 100 }, 20)?.object.id).toBe('door-b')
+    expect(findMarkerSnap(objects, { x: 100, y: 100 }, 20)).toMatchObject({ x: 104, y: 100, distance: 4 })
+    expect(findMarkerSnap(objects, { x: 100, y: 100 }, 3)).toBeUndefined()
+    expect(findMarkerSnap(objects, { x: 100, y: 100 }, 20, ['command-post'])?.object.id).toBe('cp')
   })
 })

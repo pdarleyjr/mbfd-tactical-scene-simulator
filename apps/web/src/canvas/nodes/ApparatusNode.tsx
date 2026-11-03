@@ -20,6 +20,8 @@ export const ApparatusNode = memo(function ApparatusNode({ object, size, selecte
   const interaction = useInteraction()
   const { length, width } = size
   const draggable = interaction.interactive && !object.locked && !ghost
+  const grabWidth = Math.max(width + 8 * inv, 44 * inv)
+  const grabLength = Math.max(length + 8 * inv, 44 * inv)
   return (
     <Group
       {...(ghost ? {} : { id: object.id, name: 'scene-object apparatus' })}
@@ -34,26 +36,19 @@ export const ApparatusNode = memo(function ApparatusNode({ object, size, selecte
       onDragMove={(event) => interaction.dragMove(object.id, event)}
       onDragEnd={(event) => interaction.dragEnd(object.id, event)}
     >
-      {/* Invisible grab area: at least ~36 px across on screen, so a truck is easy to pick up. */}
-      <Rect x={-Math.max(width, 36 * inv) / 2} y={-Math.max(length, 36 * inv) / 2} width={Math.max(width, 36 * inv)} height={Math.max(length, 36 * inv)} fill="rgba(0,0,0,0.001)" />
+      {/* Invisible grab area: the truck plus a margin, at least 44 px across on screen, so it is easy to pick up with a finger or pen. */}
+      <Rect x={-grabWidth / 2} y={-grabLength / 2} width={grabWidth} height={grabLength} fill="rgba(0,0,0,0.001)" />
       <Rect x={-width / 2 + 1.2} y={-length / 2 + 2.4} width={width} height={length} cornerRadius={width * 0.16} fill="rgba(0,0,0,0.38)" listening={false} />
       {image
         ? <Image image={image} x={-width / 2} y={-length / 2} width={width} height={length} perfectDrawEnabled={false} />
         : <Rect x={-width / 2} y={-length / 2} width={width} height={length} cornerRadius={width * 0.12} fill="#c8372d" stroke="#f3f1ea" strokeWidth={1} />}
       {!image && <Text x={-width / 2} y={-6} width={width} align="center" text={object.label} fontSize={10} fontStyle="bold" fill="#fff" listening={false} />}
       {selected && (
-        <Rect
-          x={-width / 2 - 4 * inv}
-          y={-length / 2 - 4 * inv}
-          width={width + 8 * inv}
-          height={length + 8 * inv}
-          cornerRadius={4 * inv}
-          stroke={ink.select}
-          strokeWidth={2}
-          strokeScaleEnabled={false}
-          dash={[7, 4]}
-          listening={false}
-        />
+        <>
+          {/* A dark edge under the blue frame keeps the selection visible over roofs, trees, and pavement alike. */}
+          <Rect x={-width / 2 - 5 * inv} y={-length / 2 - 5 * inv} width={width + 10 * inv} height={length + 10 * inv} cornerRadius={5 * inv} stroke={ink.outline} strokeWidth={5.5} strokeScaleEnabled={false} opacity={0.75} listening={false} />
+          <Rect x={-width / 2 - 5 * inv} y={-length / 2 - 5 * inv} width={width + 10 * inv} height={length + 10 * inv} cornerRadius={5 * inv} stroke={ink.select} strokeWidth={2.5} strokeScaleEnabled={false} fill={ink.selectSoft} listening={false} name="selection-frame" />
+        </>
       )}
       {object.locked && selected && <Text x={-width / 2} y={-length / 2 - 18 * inv} width={width} align="center" text="LOCKED" fontSize={10 * inv} fontStyle="bold" fill={ink.warning} listening={false} />}
     </Group>
