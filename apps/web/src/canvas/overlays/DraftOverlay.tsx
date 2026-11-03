@@ -4,13 +4,13 @@ import { apparatusSize, eligiblePorts, findPort, pointAt, pointCount, polylineLe
 import { useMemo } from 'react'
 import { sceneContext, useBoard } from '../../store/board'
 import { useUi } from '../../store/ui'
-import { currentHoseSpec, hoseSnapAt } from '../drafting'
+import { currentHoseSpec, entrySnapAt, hoseSnapAt } from '../drafting'
 import { ink } from '../interaction'
 import { ApparatusNode } from '../nodes/ApparatusNode'
 import { MeasureLine } from '../nodes/SymbolNodes'
 
 /** Live previews for drawing and placement tools. */
-export function DraftOverlay({ inv }: { inv: number }) {
+export function DraftOverlay({ inv, fontPx = 16 }: { inv: number; fontPx?: number }) {
   const tool = useUi((state) => state.tool)
   const draft = useUi((state) => state.draft)
   const cursor = useUi((state) => state.cursor)
@@ -23,6 +23,8 @@ export function DraftOverlay({ inv }: { inv: number }) {
   const context = useMemo(() => sceneContext(scenario), [scenario])
 
   const snap: SnapTarget | undefined = tool === 'hose' && cursor ? hoseSnapAt(cursor, draft) : undefined
+  // An attack line routed past a building entry point goes through the door.
+  const entry: Vec | undefined = tool === 'hose' && cursor && !snap ? entrySnapAt(cursor, draft) : undefined
   const eligible = useMemo(() => {
     if (tool !== 'hose') return []
     const spec = currentHoseSpec(draft)
@@ -46,7 +48,8 @@ export function DraftOverlay({ inv }: { inv: number }) {
   }
 
   const points = draft?.points ?? []
-  const preview = cursor && points.length >= 2 ? [...points, snap?.x ?? cursor.x, snap?.y ?? cursor.y] : points
+  const tip = snap ?? entry ?? cursor
+  const preview = tip && points.length >= 2 ? [...points, tip.x, tip.y] : points
   const hoseType = tool === 'hose' ? currentHoseSpec(draft).hoseType : undefined
   const color = hoseType ? hoseCatalog[hoseType].color : tool === 'arrow' ? ({ white: '#f3f1ea', yellow: '#f6c633', red: '#ff4d3d', blue: '#5cb8ff' })[arrowColor] : '#f3f1ea'
   const length = readLength(polylineLength(preview), scenario.calibration)
@@ -61,8 +64,12 @@ export function DraftOverlay({ inv }: { inv: number }) {
           <MeasureLine points={[scenario.calibration.a.x, scenario.calibration.a.y, scenario.calibration.b.x, scenario.calibration.b.y]} inv={inv} />
         </Group>
       )}
+      {/* Every coupling this line can connect to, so you can see where to tap before you get there. */}
       {eligible.map((target) => (
-        <Circle key={`${target.objectId}:${target.portId}`} x={target.x} y={target.y} radius={9 * inv} stroke={ink.ok} strokeWidth={2} dash={[4, 3]} strokeScaleEnabled={false} fill="rgba(76,195,138,0.12)" />
+        <Group key={`${target.objectId}:${target.portId}`} name="connect-target">
+          <Circle x={target.x} y={target.y} radius={12 * inv} stroke={ink.outline} strokeWidth={5} strokeScaleEnabled={false} opacity={0.7} />
+          <Circle x={target.x} y={target.y} radius={12 * inv} stroke={ink.ok} strokeWidth={2.5} dash={[5, 3]} strokeScaleEnabled={false} fill="rgba(76,195,138,0.22)" />
+        </Group>
       ))}
       {preview.length >= 4 && tool === 'hose' && (
         <>
@@ -73,17 +80,24 @@ export function DraftOverlay({ inv }: { inv: number }) {
       {preview.length >= 4 && tool === 'arrow' && <Arrow points={preview} stroke={color} fill={color} strokeWidth={4} pointerLength={14 * inv} pointerWidth={14 * inv} strokeScaleEnabled={false} dash={[12, 6]} />}
       {preview.length >= 4 && (tool === 'measure' || tool === 'calibrate') && <MeasureLine points={preview} inv={inv} />}
       {points.length >= 2 && <Circle x={points[0]!} y={points[1]!} radius={5 * inv} fill={color} stroke={ink.outline} strokeWidth={1.5} strokeScaleEnabled={false} />}
-      {snap && <Circle x={snap.x} y={snap.y} radius={17 * inv} stroke={ink.ok} strokeWidth={3} strokeScaleEnabled={false} fill="rgba(76,195,138,0.28)" />}
+      {snap && <Circle x={snap.x} y={snap.y} radius={20 * inv} stroke={ink.ok} strokeWidth={3.5} strokeScaleEnabled={false} fill="rgba(76,195,138,0.32)" name="snap-ring" />}
       {snap && (
-        <Label x={snap.x} y={snap.y - 20 * inv} scaleX={inv} scaleY={inv}>
-          <Tag fill="rgba(11,16,19,0.9)" stroke={ink.ok} strokeWidth={1} cornerRadius={3} pointerDirection="down" pointerWidth={8} pointerHeight={5} />
-          <Text text={snap.port.label} fontFamily="Barlow" fontStyle="700" fontSize={12} padding={4} fill={ink.ok} />
+        <Label x={snap.x} y={snap.y - 24 * inv} scaleX={inv} scaleY={inv}>
+          <Tag fill="#0b1013" stroke={ink.ok} strokeWidth={2} cornerRadius={5} pointerDirection="down" pointerWidth={10} pointerHeight={6} />
+          <Text text={`Connect: ${snap.port.label}`} fontFamily="Barlow" fontStyle="700" fontSize={fontPx - 1} padding={Math.round(fontPx * 0.3)} fill={ink.ok} />
+        </Label>
+      )}
+      {entry && <Circle x={entry.x} y={entry.y} radius={18 * inv} stroke={ink.warning} strokeWidth={3} strokeScaleEnabled={false} fill="rgba(255,176,32,0.25)" name="entry-ring" />}
+      {entry && (
+        <Label x={entry.x} y={entry.y - 22 * inv} scaleX={inv} scaleY={inv}>
+          <Tag fill="#0b1013" stroke={ink.warning} strokeWidth={2} cornerRadius={5} pointerDirection="down" pointerWidth={10} pointerHeight={6} />
+          <Text text="Through entry point" fontFamily="Barlow" fontStyle="700" fontSize={fontPx - 1} padding={Math.round(fontPx * 0.3)} fill={ink.warning} />
         </Label>
       )}
       {end && preview.length >= 4 && (
-        <Label x={end.x + 14 * inv} y={end.y + 14 * inv} scaleX={inv} scaleY={inv}>
-          <Tag fill="rgba(11,16,19,0.92)" stroke={over ? ink.warning : length.calibrated ? '#f3f1ea' : ink.warning} strokeWidth={1} cornerRadius={4} />
-          <Text text={`${length.text}${step ? ` / ${step.loadFt} ft load` : ''}`} fontFamily="Barlow" fontStyle="700" fontSize={14} padding={5} fill={over ? ink.warning : '#f3f1ea'} />
+        <Label x={end.x + 16 * inv} y={end.y + 16 * inv} scaleX={inv} scaleY={inv}>
+          <Tag fill="#0b1013" stroke={over ? ink.warning : length.calibrated ? color : ink.warning} strokeWidth={fontPx >= 22 ? 3 : 2} cornerRadius={6} />
+          <Text text={`${length.text}${step ? ` / ${step.loadFt} ft load` : ''}`} fontFamily="Barlow" fontStyle="700" fontSize={fontPx + 2} padding={Math.round(fontPx * 0.35)} fill={over ? ink.warning : '#ffffff'} />
         </Label>
       )}
     </Group>

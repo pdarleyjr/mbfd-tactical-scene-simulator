@@ -88,6 +88,7 @@ const shortcuts: Array<[string, string]> = [
   ['V', 'Select and move'],
   ['A', 'Apparatus'],
   ['H', 'Hose'],
+  ['B', 'Add fire (tap any building)'],
   ['Y', 'Hydrant'],
   ['M', 'Markers'],
   ['T', 'Note'],

@@ -1,10 +1,12 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Crosshair } from 'lucide-react'
+import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Crosshair, Save, Trash2 } from 'lucide-react'
 import { apparatusCatalog, apparatusModels, hoseCatalog, markerCatalog, type ApparatusTemplate, type EvolutionId, type HoseType } from '@mbfd/domain'
 import { useBoard } from '../store/board'
 import { canvasApi } from '../canvas/api'
 import { useUi, type HoseChoice } from '../store/ui'
-import { Segmented } from './primitives'
+import { Button, CommitText, IconButton, Segmented } from './primitives'
+import { isEffectMarker, layoutMatches, nextLayoutName, type FireKind, type FireSize } from '../lib/fire'
+import { clearAllFire, deleteFireLayout, renameFireLayout, saveFireLayout, showFireLayout } from '../lib/commands'
 
 /** Contextual options for the active tool, beside the dock. */
 export function ToolTray() {
@@ -14,6 +16,7 @@ export function ToolTray() {
   if (drawing) return null
   if (tool === 'apparatus') return <ApparatusTray />
   if (tool === 'hose') return <HoseTray />
+  if (tool === 'fire') return <FireTray />
   if (tool === 'marker') return <MarkerTray />
   if (tool === 'arrow') return <ArrowTray />
   if (tool === 'measure' || tool === 'calibrate') return <MeasureTray />
@@ -225,11 +228,75 @@ function HoseTray() {
 
 
 
+const fireKinds: Array<{ value: FireKind; label: string }> = [
+  { value: 'flames', label: 'Flames' },
+  { value: 'smoke', label: 'Smoke' },
+  { value: 'both', label: 'Both' },
+]
+const fireSizes: Array<{ value: FireSize; label: string; title: string }> = [
+  { value: 'small', label: 'Small', title: 'Room and contents' },
+  { value: 'medium', label: 'Medium', title: 'Several rooms' },
+  { value: 'large', label: 'Large', title: 'Fully involved' },
+]
+
+/**
+ * Add fire to any building: pick flames, smoke, or both and a size, then tap
+ * the map as many times as needed. Saved fire layouts turn one scene into
+ * several scenarios; showing one swaps only the fire.
+ */
+function FireTray() {
+  const kind = useUi((state) => state.fireKind)
+  const size = useUi((state) => state.fireSize)
+  const setChoice = useUi((state) => state.setFireChoice)
+  const objects = useBoard((state) => state.board.objects)
+  const layouts = useBoard((state) => state.board.scenario.fireLayouts)
+  const fires = objects.filter(isEffectMarker).length
+  const showing = useMemo(() => layouts?.find((layout) => layoutMatches(objects, layout))?.id, [layouts, objects])
+  const [name, setName] = useState('')
+  return (
+    <Tray title="Add fire" hint="Tap any building on the map to set it on fire. Keep tapping to add more. Drag a fire to move it; the round handle turns it and the top handle makes it taller." testId="fire-tray">
+      <div className="tray__row tray__row--stack">
+        <span className="tray__label">Put down</span>
+        <Segmented label="What a tap puts down" value={kind} options={fireKinds} onChange={(value) => setChoice({ kind: value })} />
+      </div>
+      <div className="tray__row tray__row--stack">
+        <span className="tray__label">Size</span>
+        <Segmented label="Fire size" value={size} options={fireSizes} onChange={(value) => setChoice({ size: value })} />
+      </div>
+      <div className="tray__row">
+        <span className="tray__note" data-testid="fire-count">{fires === 0 ? 'No fire on the map yet.' : `${fires} ${fires === 1 ? 'fire' : 'fires'} on the map.`}</span>
+        <Button tone="quiet" icon={<Trash2 size={16} />} disabled={fires === 0} onClick={clearAllFire} data-testid="remove-all-fire">Remove all</Button>
+      </div>
+
+      <h3 className="tray__subhead">Fire layouts</h3>
+      <p className="tray__note">Save where the fire is, then switch between layouts to run this scene as different fires. Units and hose stay where they are.</p>
+      {layouts && layouts.length > 0 && (
+        <ul className="layout-list" data-testid="fire-layouts">
+          {layouts.map((layout) => (
+            <li key={layout.id} className={`layout-row ${showing === layout.id ? 'is-showing' : ''}`} data-layout={layout.name}>
+              <CommitText className="input input--compact" value={layout.name} maxLength={60} required aria-label="Layout name" onCommit={(value) => renameFireLayout(layout.id, value)} />
+              <span className="layout-row__count">{layout.effects.length}</span>
+              {showing === layout.id
+                ? <span className="layout-row__badge">Showing</span>
+                : <Button tone="primary" onClick={() => showFireLayout(layout.id)} data-testid={`show-layout-${layout.id}`}>Show</Button>}
+              <IconButton label={`Delete ${layout.name}`} onClick={() => deleteFireLayout(layout.id)}><Trash2 size={16} /></IconButton>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="layout-save" onSubmit={(event) => { event.preventDefault(); if (saveFireLayout(name)) setName('') }}>
+        <input className="input" value={name} maxLength={60} placeholder={nextLayoutName(layouts ?? [])} aria-label="New layout name" onChange={(event) => setName(event.target.value)} data-testid="layout-name" />
+        <Button type="submit" icon={<Save size={16} />} disabled={fires === 0} data-testid="save-layout">Save</Button>
+      </form>
+    </Tray>
+  )
+}
+
 function MarkerTray() {
   const markerType = useUi((state) => state.markerType)
   const setMarkerType = useUi((state) => state.setMarkerType)
   return (
-    <Tray title="Markers" hint="Choose a marker, then tap the map. Flames and smoke can be resized from their edge." testId="marker-tray">
+    <Tray title="Markers" hint="Choose a marker, then tap the map. For fire on a building, the Fire tool is quicker." testId="marker-tray">
       <h3 className="tray__subhead">Fire and smoke</h3>
       <div className="marker-grid">
         {markerCatalog.filter((marker) => marker.effect).map((marker) => (

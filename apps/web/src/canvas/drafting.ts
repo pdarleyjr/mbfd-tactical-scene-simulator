@@ -10,6 +10,7 @@ import {
   evolutionSteps,
   apparatusModelFor,
   findPort,
+  findMarkerSnap,
   findSnapTarget,
   hitsObject,
   headingDegrees,
@@ -29,11 +30,12 @@ import {
 import { sceneContext, useBoard } from '../store/board'
 import { downwindDegrees } from './effects'
 import { useUi, type Draft } from '../store/ui'
+import { createFire } from '../lib/fire'
 
 /** Snap distance in screen pixels; generous for fingers. */
-const SNAP_PX = 30
+export const SNAP_PX = 36
 /** Extra margin around a truck or hydrant body that still counts as a tap on it. */
-const BODY_PX = 10
+export const BODY_PX = 14
 /** Tapping within this distance of the last point finishes the line. */
 const FINISH_PX = 14
 
@@ -86,6 +88,17 @@ export function hoseSnapAt(point: Vec, draft: Draft | null = useUi.getState().dr
     bodyMargin: BODY_PX / scale(),
     ...(starting && step ? { accept: (object: SceneObject, port) => startRuleAccepts(step.start, object, port) } : {}),
   })
+}
+
+/**
+ * An attack line routed near a building entry-point marker goes through the
+ * door: the route point lands on the marker. It never connects or finishes the line.
+ */
+export function entrySnapAt(point: Vec, draft: Draft | null = useUi.getState().draft): Vec | undefined {
+  if (!draft || draft.kind !== 'hose' || draft.points.length === 0) return undefined
+  if (currentHoseSpec(draft).purpose !== 'attack') return undefined
+  const found = findMarkerSnap(useBoard.getState().board.objects, point, SNAP_PX / scale())
+  return found ? { x: found.x, y: found.y } : undefined
 }
 
 /** The truck or hydrant under a point, used to explain why a lay could not start there. */
@@ -150,7 +163,8 @@ export function draftTap(point: Vec) {
       finishDraft({ objectId: snap.objectId, portId: snap.portId })
       return
     }
-    ui.setDraft({ ...draft, points: [...draft.points, point.x, point.y] })
+    const through = entrySnapAt(point, draft) ?? point
+    ui.setDraft({ ...draft, points: [...draft.points, through.x, through.y] })
     return
   }
   if (tool === 'arrow' || tool === 'measure') {
@@ -191,6 +205,8 @@ export function draftStroke(raw: number[]) {
       finishDraft({ objectId: snap.objectId, portId: snap.portId })
       return
     }
+    const through = entrySnapAt(end, draft)
+    if (through) appended.splice(appended.length - 2, 2, through.x, through.y)
   }
   ui.setDraft({ ...draft, points: appended })
 }
@@ -299,6 +315,7 @@ export function placeAt(point: Vec) {
   const board = useBoard.getState()
   const objects = board.board.objects
   if (ui.tool === 'apparatus' && ui.apparatusTemplate) return placeApparatusAt(ui.apparatusTemplate, point)
+  if (ui.tool === 'fire') return placeFireAt(point)
   if (ui.tool === 'hydrant') {
     const hydrant = createHydrant(point, objects)
     board.commit([...objects, hydrant], `Place hydrant ${hydrant.label}`)
@@ -319,6 +336,26 @@ export function placeAt(point: Vec) {
     return note
   }
   return undefined
+}
+
+let fireHintShown = false
+
+/**
+ * The Fire tool: each tap sets another spot on fire. The tool stays on so a
+ * whole block can be lit in a few taps, and the new fire is selected so it can
+ * be dragged, turned, or stretched straight away.
+ */
+export function placeFireAt(point: Vec) {
+  const ui = useUi.getState()
+  const board = useBoard.getState()
+  const fire = createFire(ui.fireKind, ui.fireSize, point, board.board.scenario)
+  board.commit([...board.board.objects, ...fire], fire.length > 1 ? 'Add fire and smoke' : fire[0]!.markerType === 'smoke' ? 'Add smoke' : 'Add fire')
+  ui.select(fire.map((marker) => marker.id))
+  if (!fireHintShown) {
+    fireHintShown = true
+    ui.toast('Fire added. Tap more buildings to add more. Drag a fire to move it; the handles turn and stretch it.', 'success')
+  }
+  return fire[fire.length - 1]
 }
 
 /** Drops a vehicle dragged out of the tray at a world point. */

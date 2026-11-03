@@ -6,7 +6,7 @@ import { cancelDraft, finishDraft, undoDraftPoint } from '../canvas/drafting'
 import { copySelection, deleteSelection, duplicateSelection, nudgeSelection, pasteClipboard, rotateSelection, selectAll, toggleLockSelection } from '../lib/commands'
 import { enterPresentation, exitPresentation } from '../lib/presentation'
 
-const toolKeys: Record<string, Tool> = { v: 'select', a: 'apparatus', h: 'hose', y: 'hydrant', m: 'marker', t: 'note', d: 'arrow', r: 'measure' }
+const toolKeys: Record<string, Tool> = { v: 'select', a: 'apparatus', h: 'hose', b: 'fire', y: 'hydrant', m: 'marker', t: 'note', d: 'arrow', r: 'measure' }
 
 function isTyping(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))

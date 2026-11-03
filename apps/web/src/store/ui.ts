@@ -2,8 +2,9 @@ import { create } from 'zustand'
 import type { ApparatusTemplateId, EvolutionId, HosePurpose, HoseType, MarkerType, NozzleObject, PortRef } from '@mbfd/domain'
 import type { EvolutionStep, Vec } from '@mbfd/fire-model'
 import type { ViewportTransform } from '../canvas/viewport'
+import type { FireKind, FireSize } from '../lib/fire'
 
-export type Tool = 'select' | 'apparatus' | 'hose' | 'hydrant' | 'marker' | 'note' | 'arrow' | 'measure' | 'calibrate'
+export type Tool = 'select' | 'apparatus' | 'hose' | 'fire' | 'hydrant' | 'marker' | 'note' | 'arrow' | 'measure' | 'calibrate'
 
 export type HoseChoice =
   | { kind: 'free'; hoseType: HoseType; purpose: HosePurpose }
@@ -44,6 +45,9 @@ interface UiStore {
   tool: Tool
   apparatusTemplate: ApparatusTemplateId | null
   markerType: MarkerType
+  /** Fire tool: what a tap puts on the map, and how big. */
+  fireKind: FireKind
+  fireSize: FireSize
   hoseChoice: HoseChoice
   arrowColor: 'white' | 'yellow' | 'red' | 'blue'
   selection: string[]
@@ -68,6 +72,7 @@ interface UiStore {
   setTool(tool: Tool): void
   armApparatus(templateId: ApparatusTemplateId | null): void
   setMarkerType(markerType: MarkerType): void
+  setFireChoice(choice: { kind?: FireKind; size?: FireSize }): void
   setHoseChoice(choice: HoseChoice): void
   setArrowColor(color: UiStore['arrowColor']): void
   select(ids: string[]): void
@@ -98,6 +103,8 @@ export const useUi = create<UiStore>()((set, get) => ({
   tool: 'select',
   apparatusTemplate: null,
   markerType: 'command-post',
+  fireKind: 'flames',
+  fireSize: 'medium',
   hoseChoice: { kind: 'evolution', evolutionId: 'jumpline', nozzle: 'fog' },
   arrowColor: 'white',
   selection: [],
@@ -124,6 +131,8 @@ export const useUi = create<UiStore>()((set, get) => ({
     set({ apparatusTemplate: templateId, tool: templateId ? 'apparatus' : get().tool === 'apparatus' ? 'apparatus' : get().tool, draft: null, selection: [] })
   },
   setMarkerType(markerType) { set({ markerType, tool: 'marker', draft: null, selection: [] }) },
+  // Changing what the Fire tool places keeps the fire just placed selected, so it can still be adjusted.
+  setFireChoice({ kind, size }) { set({ ...(kind ? { fireKind: kind } : {}), ...(size ? { fireSize: size } : {}), tool: 'fire', draft: null }) },
   setHoseChoice(hoseChoice) { set({ hoseChoice, tool: 'hose', draft: null, selection: [] }) },
   setArrowColor(arrowColor) { set({ arrowColor }) },
   select(ids) { set({ selection: [...new Set(ids)] }) },

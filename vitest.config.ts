@@ -10,6 +10,8 @@ export default defineConfig({
         'packages/domain/src/*.ts',
         'packages/fire-model/src/*.ts',
         'apps/web/src/canvas/viewport.ts',
+        'apps/web/src/canvas/labels.ts',
+        'apps/web/src/lib/fire.ts',
         'apps/web/src/store/board.ts',
         'apps/web/src/lib/storage.ts',
         'apps/web/src/lib/scene-files.ts',

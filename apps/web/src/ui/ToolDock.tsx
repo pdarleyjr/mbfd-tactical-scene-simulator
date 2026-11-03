@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { FireExtinguisher, MapPin, MousePointer2, MoveUpRight, Redo2, Ruler, StickyNote, Truck, Undo2, Waves } from 'lucide-react'
+import { FireExtinguisher, Flame, MapPin, MousePointer2, MoveUpRight, Redo2, Ruler, StickyNote, Truck, Undo2, Waves } from 'lucide-react'
 import { useBoard } from '../store/board'
 import { useUi, type Tool } from '../store/ui'
 
@@ -14,6 +14,7 @@ const items: DockItem[] = [
   { tool: 'select', label: 'Select', shortcut: 'V', icon: <MousePointer2 size={22} /> },
   { tool: 'apparatus', label: 'Apparatus', shortcut: 'A', icon: <Truck size={22} /> },
   { tool: 'hose', label: 'Hose', shortcut: 'H', icon: <Waves size={22} /> },
+  { tool: 'fire', label: 'Fire', shortcut: 'B', icon: <Flame size={22} /> },
   { tool: 'hydrant', label: 'Hydrant', shortcut: 'Y', icon: <FireExtinguisher size={22} /> },
   { tool: 'marker', label: 'Markers', shortcut: 'M', icon: <MapPin size={22} /> },
   { tool: 'note', label: 'Note', shortcut: 'T', icon: <StickyNote size={22} /> },

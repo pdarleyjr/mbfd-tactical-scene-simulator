@@ -12,12 +12,18 @@ const hydrantStatusColor: Record<HydrantObject['status'], string> = {
   unknown: '#8a989f',
 }
 
-/** Shared drag/selection wiring for point objects. */
-function usePlacedHandlers(id: string, locked: boolean) {
+/**
+ * Shared drag/selection wiring for point objects. With the Fire tool on, only
+ * flames and smoke (ffect) respond; everything else lets the tap through so
+ * it lands on the map and adds fire there.
+ */
+function usePlacedHandlers(id: string, locked: boolean, effect = false) {
   const interaction = useInteraction()
+  const active = !interaction.fireOnly || effect
   return {
     id,
-    draggable: interaction.interactive && !locked,
+    listening: active,
+    draggable: interaction.interactive && active && !locked,
     onPointerDown: (event: Parameters<typeof interaction.pick>[1]) => interaction.pick(id, event),
     onDragStart: (event: Parameters<typeof interaction.dragStart>[1]) => interaction.dragStart(id, event),
     onDragMove: (event: Parameters<typeof interaction.dragMove>[1]) => interaction.dragMove(id, event),
@@ -88,8 +94,8 @@ export const NozzleNode = memo(function NozzleNode({ object, selected }: { objec
 })
 
 export const MarkerNode = memo(function MarkerNode({ object, selected, inv, feetPerUnit }: { object: MarkerObject; selected: boolean; inv: number; feetPerUnit?: number | undefined }) {
-  const handlers = usePlacedHandlers(object.id, object.locked)
   const definition = findMarker(object.markerType)
+  const handlers = usePlacedHandlers(object.id, object.locked, Boolean(definition?.effect))
   const color = definition?.color ?? '#d9c8a5'
   const s = Math.min(Math.max(inv, 0.55), 2.6)
   const darkText = ['victim', 'division', 'ventilation', 'entry'].includes(object.markerType)
@@ -158,6 +164,7 @@ export const ArrowNode = memo(function ArrowNode({ object, selected, inv }: { ob
     <Group
       id={object.id}
       name="scene-object arrow"
+      listening={!interaction.fireOnly}
       draggable={interaction.interactive && !object.locked}
       onPointerDown={(event) => interaction.pick(object.id, event)}
       onDragStart={(event) => interaction.dragStart(object.id, event)}
@@ -171,13 +178,14 @@ export const ArrowNode = memo(function ArrowNode({ object, selected, inv }: { ob
   )
 })
 
-export const MeasurementNode = memo(function MeasurementNode({ object, selected, inv, reading }: { object: MeasurementObject; selected: boolean; inv: number; reading: LengthReading }) {
+export const MeasurementNode = memo(function MeasurementNode({ object, selected, inv, reading, fontPx = 16 }: { object: MeasurementObject; selected: boolean; inv: number; reading: LengthReading; fontPx?: number }) {
   const interaction = useInteraction()
   const anchor = labelAnchor(object.points)
   return (
     <Group
       id={object.id}
       name="scene-object measurement"
+      listening={!interaction.fireOnly}
       draggable={interaction.interactive && !object.locked}
       onPointerDown={(event) => interaction.pick(object.id, event)}
       onDragStart={(event) => interaction.dragStart(object.id, event)}
@@ -186,8 +194,8 @@ export const MeasurementNode = memo(function MeasurementNode({ object, selected,
     >
       <MeasureLine points={object.points} inv={inv} selected={selected} />
       <Label x={anchor.x} y={anchor.y} rotation={anchor.angle} scaleX={inv} scaleY={inv} listening={false}>
-        <Tag fill="rgba(11,16,19,0.9)" stroke={reading.calibrated ? '#f3f1ea' : ink.warning} strokeWidth={1} cornerRadius={4} pointerDirection="down" pointerWidth={8} pointerHeight={5} />
-        <Text text={reading.calibrated ? reading.text : `${reading.text} · uncalibrated`} fontFamily="Barlow" fontStyle="700" fontSize={13} padding={4} fill={reading.calibrated ? '#f3f1ea' : ink.warning} />
+        <Tag fill="#0b1013" stroke={reading.calibrated ? '#f3f1ea' : ink.warning} strokeWidth={fontPx >= 22 ? 3 : 2} cornerRadius={6} pointerDirection="down" pointerWidth={10} pointerHeight={6} />
+        <Text text={reading.calibrated ? reading.text : `${reading.text} · uncalibrated`} fontFamily="Barlow" fontStyle="700" fontSize={fontPx} padding={Math.round(fontPx * 0.32)} fill={reading.calibrated ? '#f3f1ea' : ink.warning} />
       </Label>
     </Group>
   )

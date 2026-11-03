@@ -1,8 +1,9 @@
-import { type EvolutionId, type SceneObject } from '@mbfd/domain'
+import { MAX_FIRE_LAYOUTS, type EvolutionId, type SceneObject } from '@mbfd/domain'
 import { duplicateObjects, evolutionSteps, findPort, normalizeDegrees, portWorldPosition, translateObject } from '@mbfd/fire-model'
 import { sceneContext, useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { offerUndo } from './undo'
+import { applyFireLayout, fireLayoutFrom, isEffectMarker, nextLayoutName, removeAllFire } from './fire'
 
 /** Selection commands shared by keyboard shortcuts and the inspector. */
 
@@ -64,7 +65,8 @@ export function rotateSelection(delta: number) {
   const ids = selectedIds()
   if (!ids.size) return
   useBoard.getState().commit((objects) => objects.map((object) => {
-    if (!ids.has(object.id) || object.locked || !('rotation' in object) || object.type === 'hydrant' || object.type === 'marker' || object.type === 'note') return object
+    // Vehicles, appliances, and flames and smoke turn; hydrants, badges, and notes stay upright.
+    if (!ids.has(object.id) || object.locked || !('rotation' in object) || object.type === 'hydrant' || (object.type === 'marker' && !isEffectMarker(object)) || object.type === 'note') return object
     const rotation = normalizeDegrees(object.rotation + delta)
     if (object.type === 'apparatus') useUi.getState().rememberRotation(object.templateId, rotation)
     return { ...object, rotation }
@@ -128,4 +130,58 @@ export function disconnectHoseEnd(hoseId: string, end: 'from' | 'to') {
     const { [end]: _released, ...rest } = object
     return rest as SceneObject
   }), 'Disconnect line')
+}
+
+
+/** Swaps the fire on the map for a saved layout's, as one undoable step. */
+export function showFireLayout(id: string) {
+  const { board } = useBoard.getState()
+  const layout = board.scenario.fireLayouts?.find((candidate) => candidate.id === id)
+  if (!layout) return
+  useBoard.getState().commit((objects) => applyFireLayout(objects, layout), `Show ${layout.name}`)
+  useUi.getState().select([])
+  offerUndo(`Showing ${layout.name}.`, 'success')
+}
+
+/** Saves the flames and smoke on the map as a new layout for this scenario. */
+export function saveFireLayout(name?: string) {
+  const { board } = useBoard.getState()
+  const layouts = board.scenario.fireLayouts ?? []
+  if (layouts.length >= MAX_FIRE_LAYOUTS) { useUi.getState().toast(`A scenario can keep up to ${MAX_FIRE_LAYOUTS} fire layouts. Delete one first.`, 'warning'); return undefined }
+  const layout = fireLayoutFrom(board.objects, name?.trim() || nextLayoutName(layouts))
+  useBoard.getState().updateScenario((scenario) => ({ ...scenario, fireLayouts: [...(scenario.fireLayouts ?? []), layout] }))
+  useUi.getState().toast(`Saved ${layout.name} (${layout.effects.length} ${layout.effects.length === 1 ? 'fire' : 'fires'}).`, 'success')
+  return layout
+}
+
+export function renameFireLayout(id: string, name: string) {
+  const trimmed = name.trim().slice(0, 60)
+  if (!trimmed) return
+  useBoard.getState().updateScenario((scenario) => ({ ...scenario, fireLayouts: (scenario.fireLayouts ?? []).map((layout) => layout.id === id ? { ...layout, name: trimmed } : layout) }))
+}
+
+/** Deletes a saved layout; the toast's Undo puts it back where it was. */
+export function deleteFireLayout(id: string) {
+  const layouts = useBoard.getState().board.scenario.fireLayouts ?? []
+  const index = layouts.findIndex((layout) => layout.id === id)
+  const removed = layouts[index]
+  if (!removed) return
+  useBoard.getState().updateScenario((scenario) => ({ ...scenario, fireLayouts: (scenario.fireLayouts ?? []).filter((layout) => layout.id !== id) }))
+  useUi.getState().toast(`Deleted ${removed.name}.`, 'info', {
+    label: 'Undo',
+    run: () => useBoard.getState().updateScenario((scenario) => {
+      const current = scenario.fireLayouts ?? []
+      if (current.some((layout) => layout.id === id)) return scenario
+      return { ...scenario, fireLayouts: [...current.slice(0, index), removed, ...current.slice(index)] }
+    }),
+  })
+}
+
+export function clearAllFire() {
+  const objects = useBoard.getState().board.objects
+  const count = objects.filter(isEffectMarker).length
+  if (!count) return
+  useBoard.getState().commit(removeAllFire(objects), 'Remove all fire')
+  useUi.getState().select([])
+  offerUndo(`Removed ${count} ${count === 1 ? 'fire' : 'fires'}.`)
 }

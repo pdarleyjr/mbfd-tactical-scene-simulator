@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, ArrowUpToLine, Copy, Lock, LockOpen, RotateCcw, RotateCw, Spline, Trash2, Unlink, X } from 'lucide-react'
+import { ArrowDown, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUp, ArrowUpToLine, Copy, Lock, LockOpen, Minus, Plus, RotateCcw, RotateCw, Spline, Trash2, Unlink, X } from 'lucide-react'
 import {
   apparatusModels,
   findApparatusTemplate,
@@ -17,13 +17,26 @@ import {
   type NozzleObject,
   type SceneObject,
 } from '@mbfd/domain'
-import { apparatusModelFor, apparatusSize, defaultMarkerRadius, describeHose, objectName, polylineLength, portsFor, readHose, readLength, type WaterSupplyReport } from '@mbfd/fire-model'
+import { apparatusModelFor, apparatusSize, defaultMarkerRadius, describeHose, distance, objectName, pointAt, pointCount, polylineLength, portsFor, readHose, readLength, UNCALIBRATED_UNITS_PER_FT, type WaterSupplyReport } from '@mbfd/fire-model'
 import { sceneContext, useBoard } from '../store/board'
 import { useUi } from '../store/ui'
 import { useWaterSupply } from '../store/selectors'
-import { deleteSelection, disconnectHoseEnd, duplicateSelection, nudgeObject, reorderSelection, setRotation, startEvolutionFrom, toggleLockSelection, updateObject } from '../lib/commands'
+import { deleteSelection, disconnectHoseEnd, duplicateSelection, nudgeObject, reorderSelection, rotateSelection, setRotation, startEvolutionFrom, toggleLockSelection, updateObject } from '../lib/commands'
+import { fireRadiusFor, fireSizeOf, type FireSize } from '../lib/fire'
+import { addBendAt, removeBend } from '../canvas/pathEdits'
 import { extendHose } from '../canvas/drafting'
 import { Button, CommitText, Field, IconButton, Section, Segmented } from './primitives'
+
+/** The longest run of a line, where a new bend is most useful. */
+function longestSegment(points: readonly number[]): number {
+  let best = 0
+  let bestLength = -1
+  for (let segment = 0; segment < pointCount(points) - 1; segment += 1) {
+    const length = distance(pointAt(points, segment), pointAt(points, segment + 1))
+    if (length > bestLength) { best = segment; bestLength = length }
+  }
+  return best
+}
 
 const assignments = ['Fire attack', 'Water supply', 'Primary search', 'Ventilation', 'RIT', 'Exposure protection', 'Backup line', 'Staging', 'Command']
 
@@ -98,8 +111,8 @@ function RotationControl({ object }: { object: ApparatusObject | ApplianceObject
   )
 }
 
-/** Fine positioning without dragging: moves along the map or along the vehicle. */
-function PositionPad({ object, unitsPerFt }: { object: ApparatusObject; unitsPerFt: number }) {
+/** Fine positioning without dragging: moves along the map or, for a vehicle, along its length. */
+function PositionPad({ object, unitsPerFt, vehicle = false }: { object: ApparatusObject | MarkerObject; unitsPerFt: number; vehicle?: boolean }) {
   const [stepFt, setStepFt] = useState(1)
   const step = stepFt * unitsPerFt
   const along = (direction: 1 | -1) => {
@@ -107,7 +120,7 @@ function PositionPad({ object, unitsPerFt }: { object: ApparatusObject; unitsPer
     nudgeObject(object.id, Math.sin(radians) * step * direction, -Math.cos(radians) * step * direction)
   }
   return (
-    <Field label="Position" hint="Drag the unit on the map, or nudge it here. Arrow keys also nudge (Shift for 10×).">
+    <Field label="Position" hint={`Drag it on the map, or nudge it here. Arrow keys also nudge (Shift for 10×).`}>
       {() => (
         <div className="position-pad">
           <div className="position-pad__grid">
@@ -122,8 +135,8 @@ function PositionPad({ object, unitsPerFt }: { object: ApparatusObject; unitsPer
             <span />
           </div>
           <div className="position-pad__side">
-            <Button onClick={() => along(1)}>Pull forward</Button>
-            <Button onClick={() => along(-1)}>Back up</Button>
+            {vehicle && <Button onClick={() => along(1)}>Pull forward</Button>}
+            {vehicle && <Button onClick={() => along(-1)}>Back up</Button>}
             <Segmented size="sm" label="Nudge distance" value={String(stepFt)} options={[{ value: '1', label: '1 ft' }, { value: '5', label: '5 ft' }]} onChange={(value) => setStepFt(Number(value))} />
           </div>
         </div>
@@ -155,7 +168,7 @@ function ApparatusInspector({ object, supply }: { object: ApparatusObject; suppl
         title={<CommitText className="input input--title" value={object.label} maxLength={24} required aria-label="Unit label" data-testid="unit-label" onCommit={(label) => updateObject<ApparatusObject>(object.id, { label }, 'Rename unit')} />}
         subtitle={`${template?.designation ?? object.templateId} · ${model.label} · ${Math.round(model.lengthFt * 10) / 10} ft`}
       />
-      <PositionPad object={object} unitsPerFt={size.unitsPerFt} />
+      <PositionPad object={object} unitsPerFt={size.unitsPerFt} vehicle />
       <RotationControl object={object} />
       <Field label="Assignment" hint="Shown under the unit on the map.">
         {(id) => (
@@ -264,10 +277,12 @@ function HoseInspector({ object, supply }: { object: HoseObject; supply: WaterSu
           <ConnectionRow label="Far end" reference={object.to ? objectName(index.get(object.to.objectId)) : undefined} onDisconnect={() => disconnectHoseEnd(object.id, 'to')} />
         </ul>
         {issues.map((issue) => <p key={issue.id} className={`status-line status-line--${issue.severity === 'warning' ? 'warning' : 'info'}`}>{issue.message}</p>)}
-        <p className="fine-print">Drag an end onto a port to connect it. Drag a point to reroute, drag a + to add a bend, double-tap a bend to remove it.</p>
+        <p className="fine-print">Drag an end onto a truck, hydrant, or wye to connect it; the free couplings light up green and it snaps when close. Drag a point to reroute, tap a + to add a bend, tap a bend to remove it.</p>
       </Section>
       <div className="quick-actions">
         {!object.to && <Button icon={<Spline size={17} />} onClick={() => extendHose(object)}>Extend line</Button>}
+        <Button icon={<Plus size={17} />} onClick={() => addBendAt(object.id, longestSegment(object.points))} data-testid="add-bend">Add bend</Button>
+        {object.points.length > 4 && <Button icon={<Minus size={17} />} onClick={() => removeBend(object.id, object.points.length / 2 - 2)} data-testid="remove-bend-button">Remove last bend</Button>}
         {object.points.length > 4 && <Button onClick={() => {
           const last = object.points.length - 2
           updateObject<HoseObject>(object.id, { points: [object.points[0]!, object.points[1]!, object.points[last]!, object.points[last + 1]!] }, 'Straighten line')
@@ -346,6 +361,12 @@ function NozzleInspector({ object }: { object: NozzleObject }) {
   )
 }
 
+const fireSizeOptions: Array<{ value: FireSize | 'custom'; label: string }> = [
+  { value: 'small', label: 'Small' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'large', label: 'Large' },
+]
+
 function MarkerInspector({ object }: { object: MarkerObject }) {
   const feetPerUnit = useBoard((state) => state.board.scenario.calibration?.feetPerWorldUnit)
   const definition = markerCatalog.find((marker) => marker.id === object.markerType)
@@ -377,6 +398,14 @@ function MarkerInspector({ object }: { object: MarkerObject }) {
       )}
       {definition?.effect && (
         <>
+          <Field label="Size" hint="Small: a room. Medium: several rooms. Large: fully involved.">
+            {() => <Segmented label="Fire size" value={fireSizeOf(object, feetPerUnit) ?? 'custom'} options={[...fireSizeOptions, ...(fireSizeOf(object, feetPerUnit) ? [] : [{ value: 'custom' as const, label: 'Custom' }])]} onChange={(value) => {
+              if (value === 'custom') return
+              const radius = fireRadiusFor(object, value, feetPerUnit)
+              if (radius) updateObject<MarkerObject>(object.id, { radius }, 'Resize fire')
+            }} />}
+          </Field>
+          <PositionPad object={object} unitsPerFt={feetPerUnit ? 1 / feetPerUnit : UNCALIBRATED_UNITS_PER_FT} />
           <Field label="Height (%)" hint={definition.effect === 'smoke' ? 'How far the plume reaches. Or drag the top handle on the map.' : 'Taller or shorter flames. Or drag the top handle on the map.'}>
             {(id) => <input id={id} className="input input--number" type="number" min={30} max={400} step={10} value={Math.round((object.stretch ?? 1) * 100)} onChange={(event) => {
               const value = Number(event.target.value)
@@ -428,7 +457,13 @@ function MultiInspector({ objects }: { objects: SceneObject[] }) {
   return (
     <div className="inspector" data-testid="inspector" data-type="multiple">
       <Header title={`${objects.length} selected`} subtitle={Object.entries(counts).map(([type, count]) => `${count} ${type}`).join(' · ')} />
-      <p className="fine-print">Drag any selected object to move them together. Use [ and ] to rotate vehicles, arrows keys to nudge.</p>
+      <p className="fine-print">Drag any selected object to move them together. The round handle, the buttons, or [ and ] turn vehicles and fire; arrow keys nudge.</p>
+      <div className="rotation">
+        <IconButton label="Rotate selection 15° left" onClick={() => rotateSelection(-15)}><RotateCcw size={17} /></IconButton>
+        <button type="button" className="btn btn--quiet btn--step" aria-label="Rotate selection 1° left" onClick={() => rotateSelection(-1)}>−1°</button>
+        <button type="button" className="btn btn--quiet btn--step" aria-label="Rotate selection 1° right" onClick={() => rotateSelection(1)}>+1°</button>
+        <IconButton label="Rotate selection 15° right" onClick={() => rotateSelection(15)}><RotateCw size={17} /></IconButton>
+      </div>
       <CommonActions object={objects[0]!} />
     </div>
   )
