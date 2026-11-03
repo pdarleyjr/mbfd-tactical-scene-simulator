@@ -162,18 +162,26 @@ export function renameFireLayout(id: string, name: string) {
 
 /** Deletes a saved layout; the toast's Undo puts it back where it was. */
 export function deleteFireLayout(id: string) {
-  const layouts = useBoard.getState().board.scenario.fireLayouts ?? []
+  const { board } = useBoard.getState()
+  const layouts = board.scenario.fireLayouts ?? []
   const index = layouts.findIndex((layout) => layout.id === id)
   const removed = layouts[index]
   if (!removed) return
+  const templateId = board.templateId
   useBoard.getState().updateScenario((scenario) => ({ ...scenario, fireLayouts: (scenario.fireLayouts ?? []).filter((layout) => layout.id !== id) }))
   useUi.getState().toast(`Deleted ${removed.name}.`, 'info', {
     label: 'Undo',
-    run: () => useBoard.getState().updateScenario((scenario) => {
-      const current = scenario.fireLayouts ?? []
-      if (current.some((layout) => layout.id === id)) return scenario
-      return { ...scenario, fireLayouts: [...current.slice(0, index), removed, ...current.slice(index)] }
-    }),
+    run: () => {
+      // The layout belongs to the scenario it was deleted from, and the server refuses a scenario over the cap.
+      const now = useBoard.getState().board
+      if (now.templateId !== templateId) { useUi.getState().toast(`${removed.name} belongs to the other scenario and was not restored.`, 'warning'); return }
+      if ((now.scenario.fireLayouts ?? []).length >= MAX_FIRE_LAYOUTS) { useUi.getState().toast(`A scenario can keep up to ${MAX_FIRE_LAYOUTS} fire layouts. Delete one first.`, 'warning'); return }
+      useBoard.getState().updateScenario((scenario) => {
+        const current = scenario.fireLayouts ?? []
+        if (current.some((layout) => layout.id === id)) return scenario
+        return { ...scenario, fireLayouts: [...current.slice(0, index), removed, ...current.slice(index)] }
+      })
+    },
   })
 }
 
