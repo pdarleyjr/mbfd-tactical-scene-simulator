@@ -1,4 +1,4 @@
-import { hoseCatalog, type HoseObject, type HoseType, type PortDefinition, type PortDirection, type PortRef, type SceneObject } from '@mbfd/domain'
+import { hoseCatalog, type HoseObject, type HoseType, type MarkerObject, type MarkerType, type PortDefinition, type PortDirection, type PortRef, type SceneObject } from '@mbfd/domain'
 import { distance, reversePoints, type Vec } from './geometry.js'
 import { hitsObject, portsFor, portWorldPosition, type SceneContext } from './ports.js'
 
@@ -67,6 +67,21 @@ export function findSnapTarget(objects: readonly SceneObject[], request: SnapReq
     }
   }
   return best ?? onBody
+}
+
+/**
+ * The nearest marker of the given kinds within `radius`, such as a building
+ * entry point an attack line is routed through. Markers have no couplings, so
+ * this only places the route point; it never connects the line.
+ */
+export function findMarkerSnap(objects: readonly SceneObject[], point: Vec, radius: number, markerTypes: readonly MarkerType[] = ['entry']): { object: MarkerObject; x: number; y: number; distance: number } | undefined {
+  let best: { object: MarkerObject; x: number; y: number; distance: number } | undefined
+  for (const object of objects) {
+    if (object.type !== 'marker' || !markerTypes.includes(object.markerType)) continue
+    const gap = distance(object, point)
+    if (gap <= radius && (!best || gap < best.distance)) best = { object, x: object.x, y: object.y, distance: gap }
+  }
+  return best
 }
 
 /** Every unoccupied port a given hose end could attach to, for highlighting. */

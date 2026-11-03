@@ -156,6 +156,19 @@ export const conditionsSchema = z.object({
   weather: z.string().trim().max(200).default(''),
 })
 
+/**
+ * A saved arrangement of flames and smoke on a scenario's map, so one scene
+ * can be run as several fire scenarios. Showing a layout swaps the fire on the
+ * map for the layout's; apparatus, hose and everything else stay put.
+ */
+export const fireLayoutSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1).max(60),
+  effects: z.array(markerObjectSchema).max(200),
+})
+
+export const MAX_FIRE_LAYOUTS = 20
+
 const lengthRecord = z.object({ attack175: z.number().positive().max(1000), hose3: z.number().positive().max(1000), supply5: z.number().positive().max(1000) })
 
 export const hoseLoadsSchema = z.object({
@@ -186,6 +199,8 @@ export const scenarioSchema = z.object({
   hoseLoads: hoseLoadsSchema.default(defaultHoseLoads),
   /** Operator-entered overall lengths; only used when the map is calibrated. */
   apparatusLengthFt: z.partialRecord(templateIdSchema, z.number().positive().max(200)).default({}),
+  /** Saved fire arrangements for this scenario (absent on boards saved before they existed). */
+  fireLayouts: z.array(fireLayoutSchema).max(MAX_FIRE_LAYOUTS).optional(),
 })
 
 export const timerSchema = z.object({
@@ -272,6 +287,7 @@ export type Inject = z.infer<typeof injectSchema>
 export type Benchmark = z.infer<typeof benchmarkSchema>
 export type Conditions = z.infer<typeof conditionsSchema>
 export type HoseLoads = z.infer<typeof hoseLoadsSchema>
+export type FireLayout = z.infer<typeof fireLayoutSchema>
 export type Scenario = z.infer<typeof scenarioSchema>
 export type TimerState = z.infer<typeof timerSchema>
 export type Training = z.infer<typeof trainingSchema>
@@ -315,6 +331,9 @@ export function repairBoard(raw: unknown, fallbackScenario: Scenario): { board: 
         return [id, typeof value === 'number' && value > 0 && value <= max ? value : fallback]
       })) as T
       scenario.hoseLoads = { sectionLengthFt: pick(defaultHoseLoads.sectionLengthFt, loads.sectionLengthFt, 1000), loadLengthFt: pick(defaultHoseLoads.loadLengthFt, loads.loadLengthFt, 10_000) }
+    } else if (key === 'fireLayouts' && Array.isArray(source[key])) {
+      // Keep every layout that still reads; drop only the damaged ones.
+      scenario[key] = (source[key] as unknown[]).flatMap((layout) => { const result = fireLayoutSchema.safeParse(layout); return result.success ? [result.data] : [] }).slice(0, MAX_FIRE_LAYOUTS)
     } else if (['title', 'background', 'world'].includes(key)) {
       scenario[key] = fallbackScenario[key as 'title' | 'background' | 'world']
     }
